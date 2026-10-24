@@ -138,6 +138,9 @@ length; model weights and other runtime allocations are additional.
 `Memory.clearCache()` between encoder batches and after transcription releases
 cached buffers but cannot replace a decoder-time cache ceiling.
 
+See the [controlled cache-limit validation](../benchmarks/moss-mlx.md#cache-limit-validation-2026-10-24)
+for before/after output comparisons, physical footprint, and known limitations.
+
 Audio consumes 12.5 context tokens per second. Ninety minutes is about 67,500
 audio tokens before prompt and output tokens. Approximate KV-cache storage at
 that audio-token count is:
