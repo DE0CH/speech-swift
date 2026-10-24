@@ -216,7 +216,15 @@ public enum Gemma4ToolCodec {
             guard body.hasPrefix("call:"), let brace = body.firstIndex(of: "{") else {
                 throw Gemma4ToolError.malformed("missing call name or arguments")
             }
-            let name = String(body.dropFirst(5).prefix(upTo: brace)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let renderedName = String(body.dropFirst(5).prefix(upTo: brace)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let name: String
+            if renderedName.hasPrefix(quote) || renderedName.hasPrefix("\"") {
+                var nameParser = Parser(renderedName)
+                guard case .string(let parsed) = try nameParser.parse() else {
+                    throw Gemma4ToolError.malformed("call name must be a string")
+                }
+                name = parsed
+            } else { name = renderedName }
             guard !name.isEmpty else { throw Gemma4ToolError.malformed("empty call name") }
             var parser = Parser(String(body[brace...]))
             let arguments = try parser.parse()
@@ -224,7 +232,10 @@ public enum Gemma4ToolCodec {
             calls.append(.init(name: name, arguments: arguments))
             text.removeSubrange(start.lowerBound..<end.upperBound)
         }
-        for marker in ["<eos>", "<turn|>", "<|tool_response>", "<|think|>"] {
+        guard !text.contains("<tool_call|>") else {
+            throw Gemma4ToolError.malformed("orphan tool call terminator")
+        }
+        for marker in ["<eos>", "<turn|>", "<channel|>", "<|tool_response>", "<|think|>"] {
             text = text.replacingOccurrences(of: marker, with: "")
         }
         return .init(content: text.trimmingCharacters(in: .whitespacesAndNewlines), toolCalls: calls, generatedTokens: generatedTokens)

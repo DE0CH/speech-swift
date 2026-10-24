@@ -12,6 +12,7 @@ import WhisperASR
 public struct NativeInferenceConfiguration: Codable, Sendable {
     public let runtimeRevision: String
     public let gemmaDirectory: String
+    public let agentDirectory: String?
     public let voxDirectory: String
     public let whisperDirectory: String
     public let vadDirectory: String
@@ -45,7 +46,7 @@ struct NativeInferenceRequest: Decodable, Sendable {
         guard !requestID.isEmpty, requestID.count <= 128 else { throw HTTPError(.badRequest, message: "Invalid requestID") }
         let expected: String
         switch operation {
-        case .chat: expected = "gemma4-e4b-it"
+        case .chat: expected = model == "gemma4-12b-it" ? "gemma4-12b-it" : "gemma4-e4b-it"
         case .speech: expected = "voxcpm2"
         case .transcribe: expected = "whisper-large-v3"
         case .vad: expected = "silero-vad"
@@ -146,6 +147,7 @@ private actor NativeVADStreams {
 public final class NativeInferenceService: @unchecked Sendable {
     private let config: NativeInferenceConfiguration
     private let gemma: Gemma4Chat
+    private let agent: Gemma4UnifiedChat?
     private let vox: VoxCPM2TTSModel
     private let whisper: WhisperASRModel
     private let vad: NativeVADStreams
@@ -167,6 +169,9 @@ public final class NativeInferenceService: @unchecked Sendable {
             throw HTTPError(.badRequest, message: "Gemma requires the E4B four-bit checkpoint")
         }
         self.gemma = try Gemma4Chat.fromDirectory(gemmaFolder)
+        if let directory = configuration.agentDirectory {
+            self.agent = try Gemma4UnifiedChat.fromDirectory(URL(fileURLWithPath: directory))
+        } else { self.agent = nil }
         self.vox = try await VoxCPM2TTSModel.fromPretrained(
             cacheDir: URL(fileURLWithPath: configuration.voxDirectory),
             tokenizerDirectory: URL(fileURLWithPath: configuration.voxDirectory),
@@ -187,12 +192,16 @@ public final class NativeInferenceService: @unchecked Sendable {
             if let precision { row["precision"] = precision }
             return row
         }
-        return ["schema_version": 1, "runtime": "speech-swift", "revision": config.runtimeRevision, "models": [
+        var models: [String: Any] = [
             "gemma4-e4b-it": model("gemma4-e4b-it", "gemma4", "int4", ["tool_calls", "tool_history", "json_output", "cancel"]),
             "voxcpm2": model("voxcpm2", "voxcpm2", "fp16", ["streaming", "cancel"]),
             "whisper-large-v3": model("whisper-large-v3", "whisper", "fp16", []),
             "silero-vad": model("silero-vad", "silero", nil, ["streaming"]),
-        ]]
+        ]
+        if agent != nil {
+            models["gemma4-12b-it"] = model("gemma4-12b-it", "gemma4-unified", "int4", ["tool_calls", "tool_history", "cancel"])
+        }
+        return ["schema_version": 1, "runtime": "speech-swift", "revision": config.runtimeRevision, "models": models]
     }
 
     private static func pcm(_ samples: [Float]) throws -> String {
@@ -216,10 +225,18 @@ public final class NativeInferenceService: @unchecked Sendable {
             let result: Data
             switch request.operation {
             case .chat:
-                result = try JSONEncoder().encode(gemma.generateResponse(
-                    messages: request.messages!, tools: request.tools ?? [],
-                    sampling: .init(temperature: request.temperature ?? 0, maxTokens: request.maxTokens ?? 768, repetitionPenalty: 1),
-                    cancellation: token))
+                let sampling = ChatSamplingConfig(temperature: request.temperature ?? 0,
+                                                  maxTokens: request.maxTokens ?? 768, repetitionPenalty: 1)
+                let response: Gemma4Response
+                if request.model == "gemma4-12b-it" {
+                    guard let agent else { throw HTTPError(.badRequest, message: "Gemma 4 12B is not loaded") }
+                    response = try agent.generateResponse(messages: request.messages!, tools: request.tools ?? [],
+                                                          sampling: sampling, cancellation: token)
+                } else {
+                    response = try gemma.generateResponse(messages: request.messages!, tools: request.tools ?? [],
+                                                          sampling: sampling, cancellation: token)
+                }
+                result = try JSONEncoder().encode(response)
             case .speech:
                 let samples = try await vox.generateVoxCPM2(
                     text: request.text!, maxTokens: request.maxTokens ?? 1500,
@@ -263,7 +280,7 @@ public final class NativeInferenceService: @unchecked Sendable {
             let cancel = try JSONDecoder().decode(Cancel.self, from: Data(body.readableBytesView))
             return jsonResponse(["cancelled": self.cancellations.cancel(cancel.requestID)])
         }
-        router.post("/v1/inference") { request, _ in
+        router.post("/v1/inference") { request, context in
             let body = try await request.body.collect(upTo: 16 * 1024 * 1024)
             let input: NativeInferenceRequest
             do { input = try JSONDecoder().decode(NativeInferenceRequest.self, from: Data(body.readableBytesView)) }
@@ -296,8 +313,17 @@ public final class NativeInferenceService: @unchecked Sendable {
                 return Response(status: .ok, headers: [.contentType: "application/x-ndjson"], body: .init(asyncSequence: stream))
             }
             defer { self.cancellations.remove(input.requestID) }
-            let data = try await self.perform(input, token: token)
-            return Response(status: .ok, headers: [.contentType: "application/json"], body: .init(byteBuffer: .init(data: data)))
+            do {
+                let data = try await self.perform(input, token: token)
+                return Response(status: .ok, headers: [.contentType: "application/json"], body: .init(byteBuffer: .init(data: data)))
+            } catch {
+                context.logger.error("Native inference failed", metadata: [
+                    "requestID": .string(input.requestID),
+                    "operation": .string(input.operation.rawValue),
+                    "error": .string(String(describing: error)),
+                ])
+                throw error
+            }
         }
     }
 }

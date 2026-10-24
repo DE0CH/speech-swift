@@ -2,6 +2,30 @@ import XCTest
 @testable import Qwen3Chat
 
 final class Gemma4ToolsTests: XCTestCase {
+    func testOrphanToolCallTerminatorIsRejectedBeforeSpeech() throws {
+        for raw in ["}<tool_call|>", "}<tool_call|>}<tool_call|>",
+                    "<|tool_call>call:lookup{}<tool_call|>}<tool_call|>"] {
+            XCTAssertThrowsError(try Gemma4ToolCodec.response(raw))
+        }
+    }
+
+    func testChannelCloserAfterToolResultIsRemovedFromContentOnly() throws {
+        let reply = try Gemma4ToolCodec.response("<channel|>I have found your reservation.<turn|>")
+        XCTAssertEqual(reply.content, "I have found your reservation.")
+        let call = try Gemma4ToolCodec.response("<channel|><|tool_call>call:record_note{text:<|\"|>literal <channel|> value<|\"|>}<tool_call|>")
+        XCTAssertEqual(call.content, "")
+        XCTAssertEqual(call.toolCalls.first?.arguments, .object(["text": .string("literal <channel|> value")]))
+        XCTAssertThrowsError(try Gemma4ToolCodec.response("<|channel>thought\nunfinished"))
+    }
+
+    func testQuotedFunctionNamesAreDecodedBeforeToolDispatch() throws {
+        for name in ["<|\"|>get_users<|\"|>", "\"get_users\""] {
+            let reply = try Gemma4ToolCodec.response("<|tool_call>call:\(name){}<tool_call|>")
+            XCTAssertEqual(reply.toolCalls.first?.name, "get_users")
+            XCTAssertEqual(reply.toolCalls.first?.arguments, .object([:]))
+        }
+        XCTAssertThrowsError(try Gemma4ToolCodec.response("<|tool_call>call:<|\"|>get_users{}<tool_call|>"))
+    }
     func testParsesNestedArgumentsWithoutTreatingStringPunctuationAsSyntax() throws {
         let response = try Gemma4ToolCodec.response("""
         <|channel>thought\nChoose a tool.\n<channel|>

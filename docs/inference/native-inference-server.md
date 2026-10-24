@@ -5,10 +5,22 @@ network parameters, full Whisper Large-v3 CoreML, and CoreML Silero VAD into one
 process. All model assets must already exist locally. Startup rejects incompatible
 checkpoints and performs no downloads or model substitution.
 
+Failed non-streaming inference requests log the request ID, operation, and
+underlying error in the server process. HTTP failures remain errors; inspect
+the local server log when a framework-generated HTTP 500 has an empty body.
+
+An optional `agentDirectory` loads a staged Gemma 4 12B Unified INT4 text model
+alongside E4B. The 12B checkpoint must use affine quantization with group size 64.
+Select `model: "gemma4-12b-it"` for chat requests; E4B remains available as
+`gemma4-e4b-it`. Both models use the same serialized inference queue. The 12B
+model supports native tools, result history, and cancellation; structured-output
+capabilities remain associated with E4B.
+
 ```json
 {
   "runtimeRevision": "your-source-revision",
   "gemmaDirectory": "/models/gemma4-e4b-it-int4",
+  "agentDirectory": "/models/gemma-4-12B-it-4bit",
   "voxDirectory": "/models/voxcpm2-unquantized",
   "whisperDirectory": "/models/whisper-large-v3-coreml",
   "vadDirectory": "/models/silero-vad-coreml"
@@ -36,6 +48,7 @@ output use base64 mono PCM16 little-endian, without a WAV header.
 | Operation | Model | Additional fields | Result |
 | --- | --- | --- | --- |
 | `chat` | `gemma4-e4b-it` | `messages`, optional `tools`, `maxTokens`, `temperature` | `content`, parsed `toolCalls`, `generatedTokens` |
+| `chat` | `gemma4-12b-it` (when loaded) | Same chat fields | Same text/tool response |
 | `speech` | `voxcpm2` | `text`, optional `voiceInstruction`, `seed`, `maxTokens`, `stream` | `audioBase64`, `sampleRate: 48000`, or an NDJSON stream |
 | `transcribe` | `whisper-large-v3` | `audioBase64`, `sampleRate` | English `text` |
 | `vad` | `silero-vad` | `audioBase64`, `sampleRate: 16000`, `streamID`, optional `reset`, `endStream` | One probability per 512-sample frame |

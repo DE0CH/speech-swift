@@ -746,6 +746,7 @@ let package = Package(
                 "AudioCommon",
                 "MLXCommon",
                 "CXGrammarBridge",
+                .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
@@ -1062,6 +1063,8 @@ let package = Package(
             dependencies: [
                 "MossTranscribe",
                 "AudioCommon",
+                "MLXCommon",
+                .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "Tokenizers", package: "swift-transformers")
             ]
         ),

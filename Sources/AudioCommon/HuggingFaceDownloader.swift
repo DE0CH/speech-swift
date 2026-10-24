@@ -724,8 +724,15 @@ public enum HuggingFaceDownloader {
     public static func validatedLocalPath(directory: URL, relativePath: String) throws -> URL {
         let safe = try validatedRelativePath(relativePath)
         let local = directory.appendingPathComponent(safe, isDirectory: false)
-        let dirPath = directory.standardizedFileURL.path
-        let localPath = local.standardizedFileURL.path
+        // Standardize the directory once and compare against a path built on
+        // top of it. Standardizing `local` on its own is not consistent with
+        // the directory: `standardizedFileURL` drops a leading `/private` only
+        // when the result exists on disk, so an existing `/private/tmp/x`
+        // becomes `/tmp/x` while a not-yet-downloaded
+        // `/private/tmp/x/config.json` keeps its prefix and fails the check.
+        let base = directory.standardizedFileURL
+        let dirPath = base.path
+        let localPath = base.appendingPathComponent(safe, isDirectory: false).standardizedFileURL.path
         let prefix = dirPath.hasSuffix("/") ? dirPath : (dirPath + "/")
         guard localPath.hasPrefix(prefix) else {
             throw DownloadError.invalidRemoteFileName(relativePath)
