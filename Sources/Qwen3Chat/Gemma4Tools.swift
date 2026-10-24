@@ -146,6 +146,12 @@ public enum Gemma4ToolCodec {
 
     /// Render a complete conversation, keeping tool responses inside the model turn.
     public static func prompt(messages: [Gemma4ConversationMessage], tools: [Gemma4Tool] = []) throws -> String {
+        try prompt(messages: messages, tools: tools, preserveToolResponseText: false)
+    }
+
+    /// Select text tool responses for checkpoints whose chat template wraps role:tool content verbatim.
+    static func prompt(messages: [Gemma4ConversationMessage], tools: [Gemma4Tool],
+                       preserveToolResponseText: Bool) throws -> String {
         var text = "<bos>"
         var start = 0
         let system = messages.first?.role == .system ? messages.first?.content ?? "" : ""
@@ -180,9 +186,13 @@ public enum Gemma4ToolCodec {
                         throw Gemma4ToolError.malformed("unmatched or duplicate tool response")
                     }
                     let body = result.content ?? ""
-                    let parsed = (try? JSONDecoder().decode(ChatJSONValue.self, from: Data(body.utf8))) ?? .string(body)
                     let payload: ChatJSONValue
-                    if case .object = parsed { payload = parsed } else { payload = .object(["value": parsed]) }
+                    if preserveToolResponseText {
+                        payload = .object(["value": .string(body)])
+                    } else {
+                        let parsed = (try? JSONDecoder().decode(ChatJSONValue.self, from: Data(body.utf8))) ?? .string(body)
+                        if case .object = parsed { payload = parsed } else { payload = .object(["value": parsed]) }
+                    }
                     text += "<|tool_response>response:" + call.name + value(payload) + "<tool_response|>"
                 }
                 guard seen.count == calls.count else { throw Gemma4ToolError.malformed("missing tool results") }
