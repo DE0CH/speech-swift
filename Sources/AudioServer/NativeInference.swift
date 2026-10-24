@@ -17,6 +17,7 @@ public struct NativeInferenceConfiguration: Codable, Sendable {
     public let whisperDirectory: String
     public let vadDirectory: String
     public let assets: ChatJSONValue?
+    public let failureCaptureDirectory: String?
 
     public static func load(from url: URL) throws -> Self {
         try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
@@ -153,9 +154,13 @@ public final class NativeInferenceService: @unchecked Sendable {
     private let vad: NativeVADStreams
     private let gate = NativeInferenceGate()
     private let cancellations = NativeInferenceCancellations()
+    private let failures: NativeInferenceFailures?
 
     public init(configuration: NativeInferenceConfiguration) async throws {
         self.config = configuration
+        self.failures = try configuration.failureCaptureDirectory.map {
+            try NativeInferenceFailures(directory: URL(fileURLWithPath: $0))
+        }
         Memory.cacheLimit = 128 * 1024 * 1024
         Memory.memoryLimit = 20 * 1024 * 1024 * 1024
         Memory.clearCache()
@@ -215,7 +220,8 @@ public final class NativeInferenceService: @unchecked Sendable {
     }
 
     private func perform(_ request: NativeInferenceRequest, token: InferenceCancellationToken,
-                         audioChunk: (@Sendable ([Float]) -> Void)? = nil) async throws -> Data {
+                         audioChunk: (@Sendable ([Float]) -> Void)? = nil,
+                         onGeneration: (@Sendable (Gemma4GenerationTrace) -> Void)? = nil) async throws -> Data {
         if request.operation == .vad {
             return try JSONSerialization.data(withJSONObject: ["probabilities": try await vad.predict(request)])
         }
@@ -231,7 +237,7 @@ public final class NativeInferenceService: @unchecked Sendable {
                 if request.model == "gemma4-12b-it" {
                     guard let agent else { throw HTTPError(.badRequest, message: "Gemma 4 12B is not loaded") }
                     response = try agent.generateResponse(messages: request.messages!, tools: request.tools ?? [],
-                                                          sampling: sampling, cancellation: token)
+                                                          sampling: sampling, cancellation: token, onGeneration: onGeneration)
                 } else {
                     response = try gemma.generateResponse(messages: request.messages!, tools: request.tools ?? [],
                                                           sampling: sampling, cancellation: token)
@@ -292,14 +298,14 @@ public final class NativeInferenceService: @unchecked Sendable {
                     let task = Task {
                         defer { self.cancellations.remove(input.requestID) }
                         do {
-                            _ = try await self.perform(input, token: token) { samples in
+                            _ = try await self.perform(input, token: token, audioChunk: { samples in
                                 do {
                                     let data = try JSONSerialization.data(withJSONObject: [
                                         "event": "audio", "audioBase64": Self.pcm(samples), "sampleRate": 48000])
                                     var buffer = ByteBuffer(data: data); buffer.writeString("\n")
                                     continuation.yield(buffer)
                                 } catch { token.cancel(); continuation.finish(throwing: error) }
-                            }
+                            })
                             continuation.yield(ByteBuffer(string: "{\"event\":\"done\"}\n"))
                             continuation.finish()
                         } catch {
@@ -313,10 +319,27 @@ public final class NativeInferenceService: @unchecked Sendable {
                 return Response(status: .ok, headers: [.contentType: "application/x-ndjson"], body: .init(asyncSequence: stream))
             }
             defer { self.cancellations.remove(input.requestID) }
+            let capture = self.failures != nil && input.operation == .chat ? NativeInferenceGenerationCapture() : nil
             do {
-                let data = try await self.perform(input, token: token)
+                let observer: (@Sendable (Gemma4GenerationTrace) -> Void)? = capture.map { capture in
+                    { trace in capture.store(trace) }
+                }
+                let data = try await self.perform(input, token: token, onGeneration: observer)
                 return Response(status: .ok, headers: [.contentType: "application/json"], body: .init(byteBuffer: .init(data: data)))
             } catch {
+                if input.operation == .chat, let failures = self.failures {
+                    do {
+                        let file = try failures.write(requestBody: Data(body.readableBytesView),
+                                                      requestID: input.requestID, model: input.model,
+                                                      runtimeRevision: self.config.runtimeRevision,
+                                                      error: error, generation: capture?.trace)
+                        context.logger.error("Native chat failure captured", metadata: ["file": .string(file.path)])
+                    } catch {
+                        context.logger.error("Native chat failure capture could not be written", metadata: [
+                            "requestID": .string(input.requestID), "error": .string(String(describing: error)),
+                        ])
+                    }
+                }
                 context.logger.error("Native inference failed", metadata: [
                     "requestID": .string(input.requestID),
                     "operation": .string(input.operation.rawValue),

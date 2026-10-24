@@ -42,6 +42,14 @@ For 12B, `role: tool` content is wrapped verbatim as text in the native
 template. JSON object, array, and scalar text keeps its original encoding.
 `Gemma4Chat` retains its existing structured JSON tool-response representation.
 
+`generateResponse` accepts an optional `onGeneration` callback for a
+`Gemma4GenerationTrace`. It runs after generation and before tool parsing, so a
+malformed completion remains available even when parsing throws. The trace
+contains the rendered prompt, prompt/generated token IDs, raw output, stop token
+ID, and `stop` or `length` finish reason. It is disabled by default and does not
+alter sampling or parser acceptance. See the native inference server guide for
+opt-in local failure files.
+
 The following architecture and streaming sections describe `Gemma4Chat` for
 E2B and E4B.
 

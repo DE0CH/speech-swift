@@ -32,6 +32,25 @@ make build
 .build/release/speech-server --port 8080 --inference-manifest models.json
 ```
 
+## Capturing failed chat requests
+
+Set the optional `failureCaptureDirectory` field in the manifest to a local
+directory to retain failed chat requests. Capture is disabled when this field
+is absent. New directories use permissions `0700`; an existing directory must
+already deny group and other access. Each failure receives a new UUID filename
+with permissions `0600`, independent of its request ID.
+
+The record includes the original HTTP body (UTF-8 text when applicable and
+lossless base64), request ID, model, runtime revision, and the original error.
+For completed Gemma 4 12B generations it also includes the exact rendered
+prompt, input/generated token IDs, raw output before tool parsing, stop token
+ID, and `stop` or `length` finish reason. A failure before completion has no
+generation record. E4B failures retain request metadata without a raw generation.
+
+These files contain conversation and tool content. They stay on the local
+filesystem; neither ordinary HTTP errors nor successful requests include them.
+Recording a failure does not retry it, change parsing, or convert it to success.
+
 The manifest can also carry an `assets` JSON value containing source revisions
 and file hashes. `GET /v1/inference/provenance` returns it with the configured
 runtime revision, process ID, actual VoxCPM2 parameter dtype counts, and MLX
