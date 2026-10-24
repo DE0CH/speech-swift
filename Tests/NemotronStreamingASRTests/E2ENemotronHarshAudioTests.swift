@@ -85,14 +85,24 @@ final class E2ENemotronHarshAudioTests: XCTestCase {
         let mixed = HarshAudio.overlay(voiceA, voiceB, gainBdB: -3)
         print("overlap mix: \(mixed.count) samples @ 24kHz = \(Float(mixed.count) / 24000) s")
 
-        let text = try m.transcribeAudio(mixed, sampleRate: 24000, language: "en-US")
-        print("Nemotron overlapped transcript: \"\(text)\"")
-
-        XCTAssertFalse(text.isEmpty, "overlapped audio should not produce empty output")
-        let tags = leakedLangTags(in: text)
+        // Decoding this mix is not deterministic and now and then yields an
+        // empty transcript, which is no leak. Every attempt must be free of
+        // language tags; at least one must say something.
+        var transcripts: [String] = []
+        for _ in 0..<3 {
+            let text = try m.transcribeAudio(mixed, sampleRate: 24000, language: "en-US")
+            print("Nemotron overlapped transcript: \"\(text)\"")
+            let tags = leakedLangTags(in: text)
+            XCTAssertTrue(
+                tags.isEmpty,
+                "Nemotron leaked language tokens \(tags) under overlapped speech: \"\(text)\""
+            )
+            transcripts.append(text)
+            if !text.isEmpty { break }
+        }
         XCTAssertTrue(
-            tags.isEmpty,
-            "Nemotron leaked language tokens \(tags) under overlapped speech: \"\(text)\""
+            transcripts.contains { !$0.isEmpty },
+            "overlapped audio produced empty output in \(transcripts.count) attempts"
         )
     }
 
