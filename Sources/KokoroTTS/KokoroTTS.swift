@@ -54,8 +54,12 @@ public final class KokoroTTSModel {
     /// tokens per second, so a chunk this size stays inside the 5 s graph at
     /// speed 1; the earlier 72 overflowed and split-and-retried.
     static let chunkTokenBudget = 56
+    /// No chunk grows past this many tokens, the hard cap of the same
+    /// speech-core profile. A merged chunk near the 128-token input would
+    /// overrun the 5 s graph at this speech rate and render twice.
+    static let chunkTokenHardCap = 64
     /// A last chunk shorter than this merges into the previous one when the
-    /// input allows it; very short utterances render unreliably.
+    /// hard cap allows it; very short utterances render unreliably.
     static let minTailTokens = 12
     /// Pieces of an overflow retry never go below this many tokens.
     static let minRetryTokens = 6
@@ -68,11 +72,12 @@ public final class KokoroTTSModel {
 
     /// Synthesize speech from text.
     ///
-    /// Text that fits one pass of the fixed-capacity graph renders in a single
-    /// call. Longer text, past 128 tokens or 5 s of speech, is split into
-    /// sentence-sized chunks (then clauses, then words) that are rendered one
-    /// by one and concatenated. A chunk whose speech would overrun the graph's
-    /// output window is split again and rendered as two pieces.
+    /// The text is split into chunks of up to 56 phoneme tokens, about what
+    /// the 5 s graph holds at the models' speech rate, preferring sentence
+    /// ends, then clauses, then words. Each chunk renders in one call and the
+    /// audio is concatenated, so short text is a single call. A chunk whose
+    /// speech would still overrun the graph's output window is split again
+    /// and rendered as two pieces.
     public func synthesize(
         text: String,
         voice: String = "af_heart",
@@ -116,23 +121,12 @@ public final class KokoroTTSModel {
             tokenCache[piece] = ids
             return ids
         }
-        let capacity = min(config.maxPhonemeLength, Self.inputSlots)
-
-        // Text that fits one pass renders exactly as it did before chunking
-        // existed: one call, one prosodic phrase. Only text the bounded graph
-        // cannot hold is split.
-        let whole = tokenIds(text)
-        if whole.count <= capacity {
-            let pass = try runModel(tokenIds: whole, network: network, style: styleVector, speed: speed)
-            if !pass.overran {
-                try onChunk(pass.audio, true)
-                return
-            }
-        }
-
-        let chunks = KokoroTextChunker.chunk(
-            text, countTokens: { tokenIds($0).count }, maxTokens: Self.chunkTokenBudget,
-            hardCapTokens: capacity, minTailTokens: Self.minTailTokens)
+        // Chunk up front, as speech-core does. Text within the budget is one
+        // chunk and renders in one call; rendering longer text whole first
+        // would only overrun the 5 s window and cost a discarded pass.
+        let chunks = Self.chunkPlan(
+            text, countTokens: { tokenIds($0).count },
+            capacity: min(config.maxPhonemeLength, Self.inputSlots))
 
         guard !chunks.isEmpty else {
             try onChunk([], true)
@@ -153,6 +147,18 @@ public final class KokoroTTSModel {
                 emitted = true
             }
         }
+    }
+
+    /// The chunks `text` renders as: packed to `chunkTokenBudget`, with a
+    /// short last chunk merged only within `chunkTokenHardCap`.
+    static func chunkPlan(
+        _ text: String,
+        countTokens: (String) -> Int,
+        capacity: Int = inputSlots
+    ) -> [String] {
+        KokoroTextChunker.chunk(
+            text, countTokens: countTokens, maxTokens: chunkTokenBudget,
+            hardCapTokens: min(chunkTokenHardCap, capacity), minTailTokens: minTailTokens)
     }
 
     /// Renders one chunk, splitting it again while its speech would overrun

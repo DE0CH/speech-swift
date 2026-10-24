@@ -117,12 +117,14 @@ Each frame produces 600 audio samples at 24 kHz (25ms per frame).
 
 ## Long text
 
-The end-to-end graph takes 128 phoneme tokens and renders at most 5 s per pass. Text that fits one pass renders in a single call, unchanged. Longer text is split the way speech-core splits it on Android:
+The end-to-end graph takes 128 phoneme tokens but renders at most 5 s per pass, about 56 tokens at the models' speech rate (upstream Kokoro's, ~10.5 tokens/s). Text is split the way speech-core splits it on Android, and text within one chunk renders in a single call:
 
-- Chunks are packed greedily up to 72 tokens, preferring sentence ends, then clause punctuation (`,` `;` `:`), then words, then characters for a single oversized word. Punctuation is a boundary only when whitespace or the end of the text follows it, so `3.5`, `1.000`, `z.B.` and `18:30` reach the phonemizer intact.
-- A last chunk under 12 tokens joins the previous one when the 128-token input allows it.
+- Chunks are packed greedily up to 56 tokens, preferring sentence ends, then clause punctuation (`,` `;` `:`), then words, then characters for a single oversized word. Punctuation is a boundary only when whitespace or the end of the text follows it, so `3.5`, `1.000`, `z.B.` and `18:30` reach the phonemizer intact.
+- A last chunk under 12 tokens joins the previous one when the merged chunk stays within 64 tokens.
 - A chunk whose speech would reach the last 200 ms of the output window is split at its best sentence, clause or word boundary and rendered again, up to four times.
 - `synthesize` returns the chunks' audio concatenated. `generateStream` yields each chunk as soon as it is rendered, with `frameIndex` set to the chunk's first sample in the stream.
+
+A sentence longer than one chunk, about ten words without a comma, is split between words and gets a short pause there.
 
 ## Phonemizer
 

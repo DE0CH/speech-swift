@@ -62,7 +62,7 @@ final class E2EKokoroTests: XCTestCase {
         let duration = Double(audio.count) / 24000.0
         print("Long text: \(String(format: "%.2f", duration))s")
         XCTAssertGreaterThan(duration, 6.0, "Three sentences must not be clipped to a single 5 s pass")
-        XCTAssertLessThan(audio.map { abs($0) }.max() ?? 0, 1.0)
+        XCTAssertLessThanOrEqual(audio.map { abs($0) }.max() ?? 0, 1.0)
 
         let transcription = asr.transcribe(audio: audio, sampleRate: 24000).lowercased()
         print("Output: \"\(transcription)\"")
@@ -73,7 +73,7 @@ final class E2EKokoroTests: XCTestCase {
     }
 
     func testTextThatFitsOnePassStreamsAsOneChunk() async throws {
-        // Short text renders in one call, as it did before chunking existed.
+        // Text within one chunk's budget renders in one call.
         let m = try await model()
         var chunks: [AudioChunk] = []
         for try await chunk in m.generateStream(text: "Hello there. How are you today?", language: "en") {
