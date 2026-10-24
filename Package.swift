@@ -1050,6 +1050,8 @@ let package = Package(
             dependencies: [
                 "MossTranscribe",
                 "AudioCommon",
+                "MLXCommon",
+                .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "Tokenizers", package: "swift-transformers")
             ]
         ),
