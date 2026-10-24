@@ -702,6 +702,33 @@ Unified error type in `AudioCommon` for cross-module error reporting:
 
 Each case produces a human-readable `errorDescription` with full context including underlying errors.
 
+### DownloadError
+
+`HuggingFaceDownloader.downloadWeights`, `downloadFiles`, and
+`downloadFilesByteWeighted` share a retry ladder. When retries are exhausted,
+the final attempt determines which `DownloadError` the caller receives:
+
+| Case | Fields | When |
+|------|--------|------|
+| `stalled` | `modelId`, `seconds` | No download progress within the stall timeout |
+| `checksumMismatch` | `file`, `expected`, `actual` | Downloaded bytes fail the published SHA-256 check |
+| `invalidRemoteFileName` | file name or relative path | A remote path is unsafe |
+| `networkUnavailable` | `modelId`, `detail` | A connectivity failure prevents reaching the Hub |
+| `failedToDownload` | detail | HTTP rejection, other download failure, or offline cache miss |
+
+`stalled`, `checksumMismatch`, `invalidRemoteFileName`, and `networkUnavailable`
+are rethrown with their original associated values. Foreign connectivity errors
+such as `URLError.notConnectedToInternet` become `networkUnavailable`. Other
+failures retain the existing `failedToDownload` wrapper with retry context.
+A stalled or unreachable Hub can use a complete
+cache; a missing requested file or shard still fails. Checksum failures and HTTP
+rejections propagate instead of falling back to cached files.
+
+Compatibility: a stall previously surfaced as `networkUnavailable`. Callers
+handling connectivity failures should now also handle `stalled`. Error case
+signatures are unchanged; callers can inspect associated values without parsing
+`localizedDescription`.
+
 ### Per-module errors
 
 Modules may also define their own error types for domain-specific failures:

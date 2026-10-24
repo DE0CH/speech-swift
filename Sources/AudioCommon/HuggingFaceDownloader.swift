@@ -11,9 +11,8 @@ public enum DownloadError: Error, LocalizedError {
     case stalled(modelId: String, seconds: Int)
     /// Downloaded bytes did not match the digest the Hub published for them.
     case checksumMismatch(file: String, expected: String, actual: String)
-    /// Every attempt failed for a reason that looks like the network being
-    /// unreachable, rather than the repository being wrong. Distinguished from
-    /// `failedToDownload` so a complete cache can still be used.
+    /// A connectivity failure prevented reaching the Hub. Stalled transfers
+    /// are reported separately as `stalled`; either can use a complete cache.
     case networkUnavailable(modelId: String, detail: String)
 
     public var errorDescription: String? {
@@ -137,6 +136,12 @@ public enum HuggingFaceDownloader {
     ///   sharded weights automatically
     /// - All entries in `additionalFiles` are added as-is (they work as glob
     ///   patterns, including `encoder.mlmodelc/**` for CoreML bundles)
+    ///
+    /// - Throws: `DownloadError.stalled`, `.checksumMismatch`,
+    ///   `.invalidRemoteFileName`, or `.networkUnavailable`, preserving the
+    ///   final attempt's associated values after retries. Other failures and
+    ///   offline cache misses use `.failedToDownload`. A stall or connectivity
+    ///   failure can use a complete cache instead of throwing.
     public static func downloadWeights(
         modelId: String,
         to directory: URL,
@@ -188,7 +193,7 @@ public enum HuggingFaceDownloader {
             // fetched is already on disk, the model can still load — a network
             // blip should not fail a load that needs no bytes. Anything else
             // (a 404, a checksum failure) is a real answer and propagates.
-            guard case .networkUnavailable = error,
+            guard isLikelyNetworkFailure(error),
                   cachedBundleSatisfies(globs: globs, in: directory)
             else { throw error }
             AudioLog.download.warning(
@@ -230,6 +235,12 @@ public enum HuggingFaceDownloader {
     /// that matches nothing contributes nothing and is not an error, matching
     /// what this function did when it was backed by `HubApi.snapshot`; callers
     /// that need a file to exist find out when they try to load it.
+    ///
+    /// - Throws: `DownloadError.stalled`, `.checksumMismatch`,
+    ///   `.invalidRemoteFileName`, or `.networkUnavailable`, preserving the
+    ///   final attempt's associated values after retries. Other failures and
+    ///   offline cache misses use `.failedToDownload`. A stall or connectivity
+    ///   failure can use a complete cache instead of throwing.
     public static func downloadFiles(
         modelId: String,
         to directory: URL,
@@ -264,7 +275,7 @@ public enum HuggingFaceDownloader {
                 try await fetchManifest(modelId: modelId).matching(globs: files)
             }
         } catch let error as DownloadError {
-            guard case .networkUnavailable = error,
+            guard isLikelyNetworkFailure(error),
                   firstUnsatisfiedPattern(files, in: directory) == nil
             else { throw error }
             AudioLog.download.warning(
@@ -316,6 +327,11 @@ public enum HuggingFaceDownloader {
     /// - Parameter expectedSizes: ignored. Sizes now come from the repository
     ///   listing, which cannot go stale the way a hand-maintained table does.
     ///   Kept so existing callers continue to compile.
+    /// - Throws: `DownloadError.stalled`, `.checksumMismatch`,
+    ///   `.invalidRemoteFileName`, or `.networkUnavailable`, preserving the
+    ///   final attempt's associated values after retries. Other failures and
+    ///   offline cache misses use `.failedToDownload`. A stall or connectivity
+    ///   failure can use a complete cache instead of throwing.
     public static func downloadFilesByteWeighted(
         modelId: String,
         to directory: URL,
@@ -366,7 +382,7 @@ public enum HuggingFaceDownloader {
             let allCached = safeFiles.allSatisfy {
                 fm.fileExists(atPath: directory.appendingPathComponent($0).path)
             }
-            guard case .networkUnavailable = error, allCached else { throw error }
+            guard isLikelyNetworkFailure(error), allCached else { throw error }
             AudioLog.download.warning(
                 "\(modelId, privacy: .public): Hub unreachable, every requested file is already cached")
             progressHandler?(1.0, 1, 1, "")
@@ -406,6 +422,18 @@ public enum HuggingFaceDownloader {
                 if attempt < maxAttempts {
                     try await Task.sleep(for: .seconds(delays[attempt - 1]))
                 }
+            }
+        }
+
+        // Preserve structured failures so callers can inspect their associated
+        // values without parsing localized messages. Generic download failures
+        // still receive the retry context below.
+        if let error = lastError as? DownloadError {
+            switch error {
+            case .stalled, .checksumMismatch, .invalidRemoteFileName, .networkUnavailable:
+                throw error
+            case .failedToDownload:
+                break
             }
         }
 
