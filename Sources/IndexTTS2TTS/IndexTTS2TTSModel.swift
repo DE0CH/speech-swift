@@ -111,6 +111,7 @@ public final class IndexTTS2TTSModel: SpeechGenerationModel, ModelMemoryManageab
         modelId: String = defaultModelId,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> IndexTTS2TTSModel {
         let directory = try await IndexTTS2BundleLoader.download(
@@ -118,6 +119,7 @@ public final class IndexTTS2TTSModel: SpeechGenerationModel, ModelMemoryManageab
             requiredFiles: requiredFiles,
             cacheDir: cacheDir,
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: progressHandler)
         return try await fromBundle(directory) { progress, message in
             progressHandler?(0.85 + progress * 0.15, message)

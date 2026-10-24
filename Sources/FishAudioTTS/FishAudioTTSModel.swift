@@ -62,6 +62,7 @@ public final class FishAudioTTSModel: SpeechGenerationModel, @unchecked Sendable
         modelId: String = defaultModelId,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> FishAudioTTSModel {
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -71,6 +72,7 @@ public final class FishAudioTTSModel: SpeechGenerationModel, @unchecked Sendable
             files: requiredFiles,
             expectedSizes: requiredFileSizes,
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { progress, downloadedBytes, totalBytes, _ in
                 progressHandler?(
                     progress * downloadProgressShare,

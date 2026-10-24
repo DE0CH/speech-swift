@@ -46,6 +46,7 @@ public final class SpeechLanguageIdentifier {
         engine: LanguageIDEngine = .mlx,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> SpeechLanguageIdentifier {
         let resolvedModelID = modelID ?? {
@@ -74,6 +75,7 @@ public final class SpeechLanguageIdentifier {
             to: directory,
             additionalFiles: additionalFiles,
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { progress in
                 progressHandler?(progress * 0.85, "Downloading model files...")
             }

@@ -347,6 +347,7 @@ public final class KokoroTTSModel {
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
         computeUnits: MLComputeUnits = .all,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> KokoroTTSModel {
         AudioLog.modelLoading.info("Loading Kokoro model: \(modelId)")
@@ -369,7 +370,8 @@ public final class KokoroTTSModel {
                 "dict_de.json",
                 "voices/*.json",
             ],
-            offlineMode: offlineMode
+            offlineMode: offlineMode,
+            downloadOptions: downloadOptions
         ) { fraction in
             progressHandler?(fraction * 0.7, "Downloading model...")
         }

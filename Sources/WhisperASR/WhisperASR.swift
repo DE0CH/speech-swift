@@ -46,6 +46,7 @@ public final class WhisperASRModel: SpeechRecognitionModel, @unchecked Sendable 
         modelId: String? = nil,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> WhisperASRModel {
         let effectiveModelId = modelId ?? defaultModelId
@@ -79,7 +80,8 @@ public final class WhisperASRModel: SpeechRecognitionModel, @unchecked Sendable 
                         "normalizer.json",
                         "preprocessor_config.json",
                     ],
-                    offlineMode: offlineMode
+                    offlineMode: offlineMode,
+                    downloadOptions: downloadOptions
                 ) { fraction in
                     progressHandler?(fraction * 0.75, "Downloading Whisper CoreML bundle...")
                 }
@@ -89,7 +91,8 @@ public final class WhisperASRModel: SpeechRecognitionModel, @unchecked Sendable 
 
             try await ensureTokenizer(
                 in: resolvedCacheDir,
-                offlineMode: offlineMode
+                offlineMode: offlineMode,
+                downloadOptions: downloadOptions
             ) { fraction in
                 progressHandler?(0.75 + fraction * 0.10, "Downloading Whisper tokenizer...")
             }
@@ -191,6 +194,7 @@ public final class WhisperASRModel: SpeechRecognitionModel, @unchecked Sendable 
     private static func ensureTokenizer(
         in modelFolder: URL,
         offlineMode: Bool,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws {
         let files = ["tokenizer.json", "tokenizer_config.json"]
@@ -223,12 +227,19 @@ public final class WhisperASRModel: SpeechRecognitionModel, @unchecked Sendable 
                 request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             }
 
-            let (data, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse,
-               !(200..<300).contains(http.statusCode) {
-                throw AudioModelError.modelLoadFailed(
-                    modelId: tokenizerModelId,
-                    reason: "\(file): HTTP \(http.statusCode)")
+            let data = try await HuggingFaceDownloader.withDownloadRetries(
+                modelId: tokenizerModelId,
+                retryDelaysSeconds: downloadOptions.retryDelaysSeconds ?? [],
+                downloadOptions: downloadOptions
+            ) {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse,
+                   !(200..<300).contains(http.statusCode) {
+                    throw AudioModelError.modelLoadFailed(
+                        modelId: tokenizerModelId,
+                        reason: "\(file): HTTP \(http.statusCode)")
+                }
+                return data
             }
             try data.write(to: modelFolder.appendingPathComponent(file), options: .atomic)
             progressHandler?(Double(index + 1) / Double(missingFiles.count))

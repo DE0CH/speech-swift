@@ -1575,6 +1575,7 @@ public final class PersonaPlexModel: Module {
         modelId: String = defaultModelId,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> PersonaPlexModel {
         // Download weights first to get config
@@ -1595,7 +1596,8 @@ public final class PersonaPlexModel: Module {
             modelId: modelId,
             to: modelDir,
             additionalFiles: weightFiles,
-            offlineMode: offlineMode
+            offlineMode: offlineMode,
+            downloadOptions: downloadOptions
         ) { progress in
             progressHandler?(0.05 + progress * 0.5, "Downloading...")
         }

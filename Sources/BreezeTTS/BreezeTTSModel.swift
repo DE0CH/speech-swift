@@ -50,11 +50,11 @@ public final class BreezeTTSModel: SpeechGenerationModel, @unchecked Sendable {
     }
 
     public static func fromPretrained(modelId: String = defaultModelId, cacheDir: URL? = nil,
-        offlineMode: Bool = false, progressHandler: ((Double, String) -> Void)? = nil
+        offlineMode: Bool = false, downloadOptions: DownloadOptions = .init(), progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> BreezeTTSModel {
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
         try await HuggingFaceDownloader.downloadFiles(modelId: modelId, to: directory,
-            files: requiredFiles, offlineMode: offlineMode) { progress in
+            files: requiredFiles, offlineMode: offlineMode, downloadOptions: downloadOptions) { progress in
             progressHandler?(progress * 0.9, "Downloading Breeze TTS 2")
         }
         return try await fromBundle(directory, progressHandler: progressHandler)

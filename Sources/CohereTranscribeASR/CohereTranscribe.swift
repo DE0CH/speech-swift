@@ -264,6 +264,7 @@ public extension CohereTranscribeModel {
     static func load(
         _ modelPath: String = defaultModelId,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> CohereTranscribeModel {
         var isDirectory: ObjCBool = false
@@ -274,6 +275,7 @@ public extension CohereTranscribeModel {
         return try await fromPretrained(
             modelPath,
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: progressHandler)
     }
 
@@ -281,6 +283,7 @@ public extension CohereTranscribeModel {
         _ modelId: String = defaultModelId,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> CohereTranscribeModel {
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -289,6 +292,7 @@ public extension CohereTranscribeModel {
             to: directory,
             additionalFiles: downloadAdditionalFiles,
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: progressHandler)
         return try fromDirectory(directory)
     }

@@ -319,6 +319,7 @@ public extension Nemotron3Diarizer {
         modelId: String = defaultMLXModelId,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> Nemotron3Diarizer {
         let directory = try cacheDir
@@ -329,6 +330,7 @@ public extension Nemotron3Diarizer {
             to: directory,
             additionalFiles: ["model.safetensors", "config.json"],
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { fraction in
                 progressHandler?(fraction * 0.8, "Downloading Nemotron 3 MLX bundle...")
             }

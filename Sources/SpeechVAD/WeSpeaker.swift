@@ -99,6 +99,7 @@ public final class WeSpeakerModel {
         engine: WeSpeakerEngine = .mlx,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> WeSpeakerModel {
         let resolvedModelId = modelId ?? (engine == .coreml ? defaultCoreMLModelId : defaultModelId)
@@ -113,6 +114,7 @@ public final class WeSpeakerModel {
                 modelId: resolvedModelId,
                 to: cacheDir,
                 offlineMode: offlineMode,
+                downloadOptions: downloadOptions,
                 progressHandler: { progress in
                     progressHandler?(progress * 0.8, "Downloading weights...")
                 }
@@ -133,6 +135,7 @@ public final class WeSpeakerModel {
                 to: cacheDir,
                 additionalFiles: ["wespeaker.mlmodelc/**", "config.json"],
                 offlineMode: offlineMode,
+                downloadOptions: downloadOptions,
                 progressHandler: { progress in
                     progressHandler?(progress * 0.8, "Downloading CoreML model...")
                 }

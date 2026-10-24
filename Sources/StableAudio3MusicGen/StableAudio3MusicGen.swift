@@ -63,6 +63,7 @@ public final class StableAudio3MusicGen {
         variant: StableAudio3Variant = .mediumInt8,
         tLatHint: Int? = nil,
         localBundleOverride: URL? = nil,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> StableAudio3MusicGen {
         guard variant.family == .medium else {
@@ -74,6 +75,7 @@ public final class StableAudio3MusicGen {
         let paths = try await StableAudio3Downloader.ensureDownloaded(
             variant: variant,
             localBundleOverride: localBundleOverride,
+            downloadOptions: downloadOptions,
             progressHandler: progressHandler)
 
         let tLat = tLatHint ?? computeTLat(seconds: 30.0)

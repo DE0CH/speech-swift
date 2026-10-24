@@ -32,6 +32,7 @@ public final class CamPlusPlusSpeaker {
         modelId: String = CamPlusPlusSpeaker.defaultModelId,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> CamPlusPlusSpeaker {
         let cacheDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -44,6 +45,7 @@ public final class CamPlusPlusSpeaker {
                 to: cacheDir,
                 additionalFiles: ["CamPlusPlus.mlmodelc/**"],
                 offlineMode: offlineMode,
+                downloadOptions: downloadOptions,
                 progressHandler: { progress in
                     progressHandler?(progress * 0.8, "Downloading CAM++ speaker model...")
                 }
