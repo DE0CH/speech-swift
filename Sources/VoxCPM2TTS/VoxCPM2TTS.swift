@@ -63,6 +63,9 @@ public final class VoxCPM2TTSModel: Module {
     private var tokenizer: Tokenizer?
     private var voxCPM2TokenizerSplitMap: [Int: [Int]] = [:]
     private var _isLoaded: Bool = true
+    /// Registration in the process-wide MLX cache budget. Released by `unload()`
+    /// or automatically when this model is destroyed.
+    var mlxCacheLimitLease: MLXCacheLimitCoordinator.Lease?
     private static var debugVerboseEnabled: Bool {
         ProcessInfo.processInfo.environment["VOXCPM2_DEBUG_VERBOSE"] == "1"
     }
@@ -231,6 +234,9 @@ public final class VoxCPM2TTSModel: Module {
         let args = try ModelArgs.load(from: modelCacheDir)
         try weightPrecision.validate(quantized: args.quantization?.isQuantized == true)
         let model = VoxCPM2TTSModel(args: args)
+        // Hold the ceiling from weight loading and float32 promotion onward;
+        // a failed load releases it with the model.
+        model.mlxCacheLimitLease = VoxCPM2Memory.acquireCacheLimit()
 
         progressHandler?(0.88, "Loading tokenizer...")
         let tokenizer = try await Self.loadTokenizer(from: tokenizerCacheDir)
@@ -1583,6 +1589,8 @@ extension VoxCPM2TTSModel: ModelMemoryManageable {
         stop_proj.clearParameters()
         stop_head.clearParameters()
         audio_vae.clearParameters()
+        mlxCacheLimitLease?.release()
+        mlxCacheLimitLease = nil
         _isLoaded = false
     }
 

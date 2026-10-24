@@ -69,6 +69,7 @@ speech speak "This is an ultimate cloning demo." \
 - If `--voxcpm2-prompt-audio` is set, `--voxcpm2-prompt-text` must be provided too
 - The HF snapshot includes `tokenization_voxcpm2.py` and `tokenizer_config.json` with `VoxCPM2Tokenizer`; the Swift backend refreshes stale tokenizer snapshots and mirrors the upstream multi-character Chinese token split before encoding
 - On Apple Silicon, the Swift backend promotes VoxCPM2 parameters to `float32` by default to match the upstream MPS safety policy, and the `AudioVAE` decode path always receives `float32` latents
+- While a VoxCPM2 model is loaded, MLX's reusable-buffer cache is capped at `min(2 GiB, 25% of physical RAM)`, from weight loading onward. Every line has a different length, so without the cap a long-lived model collects buffers of new sizes: eight lines of 1–8 s on a 48 GB Mac grew the process from 12.7 GB to 33.9 GB, against about 13 GB with the cap, with the same audio. A lower caller `MLX.Memory.cacheLimit` is kept; the cap is shared with the other MLX models that set one, and `unload()` restores the caller's limit
 
 ## Swift API
 

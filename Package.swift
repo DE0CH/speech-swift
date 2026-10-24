@@ -1263,6 +1263,7 @@ let package = Package(
             dependencies: [
                 "VoxCPM2TTS",
                 "AudioCommon",
+                "MLXCommon",
                 .product(name: "MLX", package: "mlx-swift")
             ]
         ),
