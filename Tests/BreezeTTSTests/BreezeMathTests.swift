@@ -45,7 +45,7 @@ final class BreezeMathTests: XCTestCase {
             let actual = encoder(MLXArray(fixture.ids).reshaped([1, -1])).reshaped([-1])
             let expected = MLXArray(fixture.expected.flatMap { $0 })
             XCTAssertLessThan(abs(actual - expected).max().item(Float.self), 0.0001)
-            }
+        }
     }
 
     func testDepthCacheMatchesFullCausalForward() throws {
@@ -77,7 +77,7 @@ final class BreezeMathTests: XCTestCase {
             eval(last)
             XCTAssertLessThan(abs(full[0, -1] - last[0, -1]).max().item(Float.self), 0.0001)
             XCTAssertEqual(cache.first?.offset, 4)
-            }
+        }
     }
 
     func testBidirectionalWindowMatchesUpstreamEdges() throws {
@@ -89,6 +89,6 @@ final class BreezeMathTests: XCTestCase {
             XCTAssertEqual(row(3), [2, 3, 4, 5])
             XCTAssertEqual(row(6), [5, 6])
             XCTAssertNil(breezeTextAttentionMask(length: 7, layerType: "full_attention", slidingWindow: 4))
-            }
+        }
     }
 }

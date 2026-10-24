@@ -4,15 +4,19 @@ import XCTest
 final class E2EBreezeCLITests: XCTestCase {
     func testStreamingCLIProducesCompleteWAV() throws {
         let env = ProcessInfo.processInfo.environment
-        guard let binary = env["SPEECH_CLI"], let bundle = env["BREEZE_E2E_BUNDLE"] else {
-            throw XCTSkip("Set SPEECH_CLI and BREEZE_E2E_BUNDLE")
+        guard let binary = env["SPEECH_CLI"] else {
+            throw XCTSkip("Set SPEECH_CLI to the built speech executable")
         }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
         defer { try? FileManager.default.removeItem(at: url) }
         let process = Process(), pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: binary)
-        process.arguments = ["speak", "The quick brown fox jumps over the lazy dog.", "--engine", "breeze",
-            "--instruct", "A clear English narrator.", "--stream", "--breeze-bundle-dir", bundle, "-o", url.path]
+        var arguments = ["speak", "The quick brown fox jumps over the lazy dog.", "--engine", "breeze",
+            "--instruct", "A clear English narrator.", "--stream", "-o", url.path]
+        if let bundle = env["BREEZE_E2E_BUNDLE"] {
+            arguments += ["--breeze-bundle-dir", bundle]
+        }
+        process.arguments = arguments
         process.standardOutput = pipe; process.standardError = pipe
         try process.run()
         let log = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)

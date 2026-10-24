@@ -5,15 +5,15 @@ import Qwen3ASR
 import XCTest
 
 final class E2EBreezeTTSTests: XCTestCase {
-    private func bundle() throws -> URL {
-        guard let path = ProcessInfo.processInfo.environment["BREEZE_E2E_BUNDLE"] else {
-            throw XCTSkip("Set BREEZE_E2E_BUNDLE to a converted Breeze checkpoint")
+    private func loadModel() async throws -> BreezeTTSModel {
+        if let path = ProcessInfo.processInfo.environment["BREEZE_E2E_BUNDLE"] {
+            return try await BreezeTTSModel.fromBundle(URL(fileURLWithPath: path))
         }
-        return URL(fileURLWithPath: path)
+        return try await BreezeTTSModel.fromPretrained()
     }
 
     func testFullModelAgainstOfficialPyTorch() async throws {
-        let model = try await BreezeTTSModel.fromBundle(bundle())
+        let model = try await loadModel()
         let url = try XCTUnwrap(Bundle.module.url(forResource: "model-fixture", withExtension: "json", subdirectory: "Resources"))
         struct Fixture: Decodable {
             let ids: [Int32]
@@ -50,7 +50,7 @@ final class E2EBreezeTTSTests: XCTestCase {
     }
 
     func testStreamingAndIndependentASRRoundTrip() async throws {
-        var model: BreezeTTSModel? = try await BreezeTTSModel.fromBundle(bundle())
+        var model: BreezeTTSModel? = try await loadModel()
         let fixture = try XCTUnwrap(Bundle.module.url(forResource: "tokenizer-fixtures", withExtension: "json", subdirectory: "Resources"))
         struct Row: Decodable { let text: String; let ids: [Int] }
         for row in try JSONDecoder().decode([Row].self, from: Data(contentsOf: fixture)) {
@@ -84,7 +84,7 @@ final class E2EBreezeTTSTests: XCTestCase {
     }
 
     func testFrameLimitThrowsInsteadOfReturningTruncatedAudio() async throws {
-        let model = try await BreezeTTSModel.fromBundle(bundle())
+        let model = try await loadModel()
         do {
             _ = try await model.generate(text: "The quick brown fox jumps over the lazy dog.",
                 instruction: "A clear English voice.", options: BreezeTTSOptions(maxFrames: 1))
@@ -97,7 +97,7 @@ final class E2EBreezeTTSTests: XCTestCase {
         guard let path = env["BREEZE_REFERENCE_WAV"], let transcript = env["BREEZE_REFERENCE_TEXT"] else {
             throw XCTSkip("Set BREEZE_REFERENCE_WAV and BREEZE_REFERENCE_TEXT")
         }
-        let model = try await BreezeTTSModel.fromBundle(bundle())
+        let model = try await loadModel()
         let reference = try AudioFileLoader.load(url: URL(fileURLWithPath: path), targetSampleRate: 24_000)
         for instruction in [nil, "Speak clearly and warmly."] as [String?] {
             let samples = try await model.generate(text: "The weather is beautiful today.", instruction: instruction,
@@ -105,6 +105,35 @@ final class E2EBreezeTTSTests: XCTestCase {
             XCTAssertGreaterThan(samples.count, 24_000)
             XCTAssertTrue(samples.allSatisfy(\.isFinite))
             XCTAssertGreaterThan(samples.map { abs($0) }.max() ?? 0, 0.01)
+        }
+    }
+
+    func testOverlappingGenerationIsRejectedAndLockRecovers() async throws {
+        let model = try await loadModel()
+        var checkedOverlap = false
+        do {
+            try await model.generateStreaming(text: "The weather is beautiful today.",
+                instruction: "A clear English narrator.", options: BreezeTTSOptions(maxFrames: 200)) { chunk in
+                guard !chunk.samples.isEmpty else { return }
+                checkedOverlap = true
+                do {
+                    _ = try await model.generate(text: "Hello.", instruction: nil)
+                    XCTFail("Expected overlapping generation to fail")
+                } catch BreezeTTSError.invalidInput(let message) {
+                    XCTAssertTrue(message.contains("already generating"), message)
+                }
+                throw CancellationError()
+            }
+            XCTFail("Expected the chunk callback cancellation to propagate")
+        } catch is CancellationError {}
+        XCTAssertTrue(checkedOverlap)
+
+        do {
+            _ = try await model.generate(text: "The weather is beautiful today.", instruction: nil,
+                options: BreezeTTSOptions(maxFrames: 1))
+            XCTFail("Expected frame limit after the generation lock was released")
+        } catch BreezeTTSError.frameLimit(let limit) {
+            XCTAssertEqual(limit, 1)
         }
     }
 }

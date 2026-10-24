@@ -91,4 +91,3 @@ Round-trip verification uses `aufklarer/Qwen3-ASR-0.6B-MLX-4bit`, normalized WER
 for English and CER for Chinese. It verifies speech content, not voice identity,
 instruction adherence, acoustic quality, or absence of boundary artifacts. A
 short-sentence smoke benchmark is not a general multilingual quality evaluation.
-
