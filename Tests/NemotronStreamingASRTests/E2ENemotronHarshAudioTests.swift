@@ -144,17 +144,19 @@ final class E2ENemotronHarshAudioTests: XCTestCase {
     /// correctness (this test) with model difficulty on multi-speaker audio
     /// (a checkpoint property, not a Swift bug).
     ///
-    /// Expected recall ≥ 0.95 on continuous single-voice speech. A drop
-    /// below this floor indicates a real chunker regression — the boundary
-    /// math being silently changed, the cache I/O wiring breaking, or a
-    /// well-meaning "fix" introducing audio overlap (which would corrupt
-    /// the RNN-T decoder's LSTM state, see RNNTGreedyDecoder.swift:38-89).
+    /// Both transcripts are scored against the spoken text, and the stream
+    /// must recover as much of it as the batch pass, within 0.05 (two words
+    /// of this paragraph). A larger gap indicates a real chunker regression —
+    /// the boundary math being silently changed, the cache I/O wiring
+    /// breaking, or a well-meaning "fix" introducing audio overlap (which
+    /// would corrupt the RNN-T decoder's LSTM state, see
+    /// RNNTGreedyDecoder.swift:38-89).
     func testStreamingMatchesBatchOnCleanLongUtterance() async throws {
         let m = try model
         let tts = try await KokoroTTSModel.fromPretrained()
 
-        // ~18 s of continuous English speech, single speaker, no silence
-        // gaps, ~56 chunk crossings at the 320 ms multilingual cadence.
+        // ~23 s of continuous English speech from one speaker, ~70 chunk
+        // crossings at the 320 ms multilingual cadence.
         let longText = """
         The quarterly report indicated steady growth across all three divisions. \
         Manufacturing output rose by twelve percent while logistics costs declined. \
@@ -172,18 +174,27 @@ final class E2ENemotronHarshAudioTests: XCTestCase {
             return XCTFail("streaming pass produced no partials")
         }
 
-        let batchWords = Set(wordTokens(batchText))
-        let streamWords = Set(wordTokens(streamFinal.text))
-        let recall = batchWords.isEmpty
-            ? 1.0
-            : Double(batchWords.intersection(streamWords).count) / Double(batchWords.count)
-        print("clean-long recall (stream covers batch): \(recall)")
+        // Scoring the stream against the batch transcript would count every
+        // word the batch pass mishears ("past" for "passed") as a streaming
+        // loss, so both are scored against the text Kokoro spoke.
+        let reference = Set(wordTokens(longText))
+        func recall(_ transcript: String) -> Double {
+            Double(reference.intersection(wordTokens(transcript)).count) / Double(reference.count)
+        }
+        let batchRecall = recall(batchText)
+        let streamRecall = recall(streamFinal.text)
+        print("clean-long: \(String(format: "%.1f", Double(audio.count) / 24000)) s of audio")
+        print("clean-long recall vs spoken text: batch \(batchRecall), stream \(streamRecall)")
         print("  batch:  \"\(batchText)\"")
         print("  stream: \"\(streamFinal.text)\"")
 
         XCTAssertGreaterThanOrEqual(
-            recall, 0.95,
-            "streaming chunker dropped content vs batch on clean continuous speech: recall=\(recall). This indicates a real chunker regression — boundary math, cache I/O, or accidental audio overlap. See `nemotron-streaming-chunker-fix` workflow notes."
+            batchRecall, 0.85,
+            "the batch pass misses the spoken text, so the synthesized fixture is suspect: \"\(batchText)\""
+        )
+        XCTAssertGreaterThanOrEqual(
+            streamRecall, batchRecall - 0.05,
+            "streaming chunker dropped content vs batch on clean continuous speech: stream recall=\(streamRecall), batch recall=\(batchRecall). This indicates a real chunker regression — boundary math, cache I/O, or accidental audio overlap. See `nemotron-streaming-chunker-fix` workflow notes."
         )
     }
 }
