@@ -37,6 +37,11 @@ are rejected as malformed responses. Cancellation is cooperative. Prefill evalua
 buffered text/tool responses; it rejects constrained response formats. Vision
 and audio input use other modules and are outside this text interface.
 
+For 12B, `role: tool` content is wrapped verbatim as text in the native
+`response:name{value:...}` block, matching the checkpoint's standard chat
+template. JSON object, array, and scalar text keeps its original encoding.
+`Gemma4Chat` retains its existing structured JSON tool-response representation.
+
 The following architecture and streaming sections describe `Gemma4Chat` for
 E2B and E4B.
 
