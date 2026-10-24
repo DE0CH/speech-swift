@@ -61,6 +61,7 @@ let package = Package(
             name: "F5TTS",
             targets: ["F5TTS"]
         ),
+        .library(name: "BreezeTTS", targets: ["BreezeTTS"]),
         .library(
             name: "HiggsTTS",
             targets: ["HiggsTTS"]
@@ -434,6 +435,16 @@ let package = Package(
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
                 .product(name: "MLXFFT", package: "mlx-swift"),
+            ]
+        ),
+        .target(
+            name: "BreezeTTS",
+            dependencies: [
+                "AudioCommon", "MLXCommon", "Qwen3TTS",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+                .product(name: "MLXFast", package: "mlx-swift"),
+                .product(name: "Tokenizers", package: "swift-transformers"),
             ]
         ),
         .target(
@@ -847,6 +858,7 @@ let package = Package(
                 "VoxCPM2TTS",
                 "F5TTS",
                 "HiggsTTS",
+                "BreezeTTS",
                 "IndexTTS2TTS",
                 "IndicMioTTS",
                 "MAGNeTMusicGen",
@@ -1104,6 +1116,11 @@ let package = Package(
                 .copy("Resources/pinyin_fixtures.json"),
                 .copy("Resources/pinyin_lexicon_subset.tsv"),
             ]
+        ),
+        .testTarget(
+            name: "BreezeTTSTests",
+            dependencies: ["BreezeTTS", "Qwen3ASR", "AudioCommon"],
+            resources: [.copy("Resources")]
         ),
         .testTarget(
             name: "HiggsTTSTests",
