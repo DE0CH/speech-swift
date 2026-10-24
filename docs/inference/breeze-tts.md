@@ -31,6 +31,9 @@ The shared `SpeechGenerationModel` protocol supports plain synthesis and streami
 speech speak "The quick brown fox jumps over the lazy dog." --engine breeze \
   --instruct "A clear, calm English narrator." --stream -o design.wav
 
+speech speak "Hello, world!" --engine breeze \
+  --breeze-model-id aufklarer/Breeze-TTS-2-MLX-bf16 -o bf16.wav
+
 speech speak "The weather is beautiful today." --engine breeze \
   --voice-sample reference.wav --breeze-reference-text "The exact reference transcript." \
   --breeze-seed 42 -o clone.wav
@@ -82,3 +85,24 @@ The exporter requires `mlx`, `numpy`, and `huggingface_hub`. `export_config.json
 records source revision, removed tensors, quantized layers, and file checksums.
 Use the [benchmark procedure](../benchmarks/breeze-tts.md) before publishing a
 converted bundle. Upstream NVIDIA latency claims do not describe this Swift port.
+
+## Regression checks
+
+The E2E suite loads the published default bundle when `BREEZE_E2E_BUNDLE` is
+unset. It checks English and Chinese streaming against independent ASR, official
+PyTorch numerical fixtures, frame-limit errors, and overlapping-request rejection
+with recovery after callback cancellation. The CLI E2E test also uses the published
+default unless a local bundle override is supplied.
+
+After building tests and the debug metallib, run the model suites in isolation:
+
+```bash
+SPEECH_CLI="$PWD/.build/release/speech" E2E_ONLY_FILTER=Breeze E2E_SKIP_UNIT=1 \
+  scripts/test_e2e_isolated.sh
+```
+
+Build the release `speech` product first for the CLI check. Set
+`BREEZE_REFERENCE_WAV` and `BREEZE_REFERENCE_TEXT` to a reference file and its
+exact transcript to include cloning and direction. Set `BREEZE_E2E_BUNDLE` to a
+local BF16 or 8-bit export when testing a specific conversion. Run these checks
+sequentially with other model tests and benchmarks.

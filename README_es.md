@@ -198,6 +198,7 @@ Vista compacta a continuación. **[Catálogo completo de modelos con tamaños, c
 | [IndexTTS2](docs/models/indextts2.md) | Text → Speech (zero-shot voice cloning) | MLX | 1.5B-class (fp16) | EN/ZH |
 | [F5-TTS](docs/models/f5-tts.md) | Text → Speech (zero-shot voice cloning) | MLX | 336M (fp16) | EN/ZH |
 | [Higgs TTS 3](docs/models/higgs-tts.md) | Text → Speech (conversational, zero-shot voice cloning) | MLX | 4B (bf16) | 100+ |
+| [Breeze TTS 2](docs/models/breeze-tts.md) | Texto → Voz | MLX | BF16 / INT8 | EN/ZH |
 | [Chatterbox Multilingual](https://huggingface.co/aufklarer/Chatterbox-Multilingual-MLX-fp16) | Texto → Voz (clonación zero-shot) | MLX | 0.8B (fp16) | 23 (HE requiere niqqud) |
 | [OmniVoice](https://huggingface.co/aufklarer/OmniVoice-MLX-fp16) | Texto → Voz (difusión NAR, clonación zero-shot) | MLX | 0.8B (fp16 por defecto / int8) | 600+ |
 | [Indic-Mio](docs/models/indic-mio-tts.md) | Text → Speech (Hindi/Indic, emotion tags, voice cloning) | MLX | fp16 | Hindi / Indic |

@@ -198,6 +198,7 @@ struct DictateView: View {
 | [IndexTTS2](docs/models/indextts2.md) | Text → Speech (zero-shot voice cloning) | MLX | 1.5B-class (fp16) | EN/ZH |
 | [F5-TTS](docs/models/f5-tts.md) | Text → Speech (zero-shot voice cloning) | MLX | 336M (fp16) | EN/ZH |
 | [Higgs TTS 3](docs/models/higgs-tts.md) | Text → Speech (conversational, zero-shot voice cloning) | MLX | 4B (bf16) | 100+ |
+| [Breeze TTS 2](docs/models/breeze-tts.md) | टेक्स्ट → स्पीच | MLX | BF16 / INT8 | EN/ZH |
 | [Chatterbox Multilingual](https://huggingface.co/aufklarer/Chatterbox-Multilingual-MLX-fp16) | टेक्स्ट → स्पीच (ज़ीरो-शॉट क्लोनिंग) | MLX | 0.8B (fp16) | 23 (HE के लिए niqqud आवश्यक) |
 | [OmniVoice](https://huggingface.co/aufklarer/OmniVoice-MLX-fp16) | टेक्स्ट → स्पीच (NAR डिफ्यूज़न, ज़ीरो-शॉट क्लोनिंग) | MLX | 0.8B (fp16 डिफ़ॉल्ट / int8) | 600+ |
 | [Indic-Mio](docs/models/indic-mio-tts.md) | Text → Speech (Hindi/Indic, emotion tags, voice cloning) | MLX | fp16 | Hindi / Indic |

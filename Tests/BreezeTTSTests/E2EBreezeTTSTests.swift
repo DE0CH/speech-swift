@@ -50,16 +50,25 @@ final class E2EBreezeTTSTests: XCTestCase {
     }
 
     func testStreamingAndIndependentASRRoundTrip() async throws {
+        try await assertStreamingRoundTrip(text: "The quick brown fox jumps over the lazy dog.",
+            instruction: "A clear, calm English narrator.", language: "English")
+    }
+
+    func testChineseStreamingAndIndependentASRRoundTrip() async throws {
+        try await assertStreamingRoundTrip(text: "你好，欢迎使用语音合成。今天天气很好，我们一起去散步吧。",
+            instruction: "一位声音清晰、语气亲切的普通话女声。", language: "Chinese")
+    }
+
+    private func assertStreamingRoundTrip(text: String, instruction: String, language: String) async throws {
         var model: BreezeTTSModel? = try await loadModel()
         let fixture = try XCTUnwrap(Bundle.module.url(forResource: "tokenizer-fixtures", withExtension: "json", subdirectory: "Resources"))
         struct Row: Decodable { let text: String; let ids: [Int] }
         for row in try JSONDecoder().decode([Row].self, from: Data(contentsOf: fixture)) {
             XCTAssertEqual(model!.tokenIDs(row.text), row.ids, row.text)
         }
-        let text = "The quick brown fox jumps over the lazy dog."
         var samples: [Float] = []
         var chunks = 0, finalChunks = 0
-        try await model!.generateStreaming(text: text, instruction: "A clear, calm English narrator.",
+        try await model!.generateStreaming(text: text, instruction: instruction,
             options: BreezeTTSOptions(maxFrames: 200)) { chunk in
             XCTAssertEqual(chunk.sampleRate, 24_000)
             XCTAssertEqual(chunk.frameIndex, samples.count / 1920)
@@ -76,11 +85,16 @@ final class E2EBreezeTTSTests: XCTestCase {
         model = nil
         Memory.clearCache()
         let asr = try await Qwen3ASRModel.fromPretrained()
-        let actual = asr.transcribe(audio: samples, sampleRate: 24_000, language: "English")
+        let actual = asr.transcribe(audio: samples, sampleRate: 24_000, language: language)
         func words(_ text: String) -> [String] {
             text.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init)
         }
-        XCTAssertEqual(words(actual), words(text), actual)
+        if language == "Chinese" {
+            XCTAssertEqual(actual.filter { $0.isLetter || $0.isNumber },
+                           text.filter { $0.isLetter || $0.isNumber }, actual)
+        } else {
+            XCTAssertEqual(words(actual), words(text), actual)
+        }
     }
 
     func testFrameLimitThrowsInsteadOfReturningTruncatedAudio() async throws {
