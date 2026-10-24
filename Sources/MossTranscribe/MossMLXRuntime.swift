@@ -1,6 +1,7 @@
 import AudioCommon
 import Foundation
 import MLX
+import MLXCommon
 import MLXLMCommon
 import MLXNN
 import Tokenizers
@@ -65,6 +66,7 @@ public final class MossMLXModel:
     private let promptProcessor: MossPromptProcessor
     private let featureExtractor = MossWhisperFeatureExtractor()
     private let inferenceLock = NSLock()
+    private let cacheLimitLease: MLXCacheLimitCoordinator.Lease?
 
     private init(
         modelId: String,
@@ -73,7 +75,8 @@ public final class MossMLXModel:
         audioModel: MossMLXAudioModel,
         textModel: MossMLXTextModel,
         tokenizer: any Tokenizers.Tokenizer,
-        promptProcessor: MossPromptProcessor
+        promptProcessor: MossPromptProcessor,
+        cacheLimitLease: MLXCacheLimitCoordinator.Lease?
     ) {
         self.modelId = modelId
         self.modelFolder = modelFolder
@@ -82,6 +85,7 @@ public final class MossMLXModel:
         self.textModel = textModel
         self.tokenizer = tokenizer
         self.promptProcessor = promptProcessor
+        self.cacheLimitLease = cacheLimitLease
     }
 
     public static func fromPretrained(
@@ -210,6 +214,9 @@ public final class MossMLXModel:
             )
         }
 
+        // Keep the ceiling through loading, warm-up, and every transcription.
+        // The shared lease preserves tighter caller and Qwen3-ASR budgets.
+        let cacheLimitLease = MossMLXMemory.acquireCacheLimit()
         progressHandler?(0.1, "Loading MOSS MLX audio encoder...")
         let audioModel = MossMLXAudioModel(configuration)
         do {
@@ -270,7 +277,8 @@ public final class MossMLXModel:
             audioModel: audioModel,
             textModel: textModel,
             tokenizer: tokenizer,
-            promptProcessor: promptProcessor
+            promptProcessor: promptProcessor,
+            cacheLimitLease: cacheLimitLease
         )
     }
 
