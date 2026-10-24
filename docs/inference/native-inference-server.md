@@ -92,6 +92,11 @@ JSON schema. The runtime uses Gemma's native declaration/call/result tokens,
 expands local schema references, and validates generated argument syntax.
 Clients own validation of application-specific JSON replies.
 
+For 12B, duplicate adjacent closing markers immediately after a complete,
+validated tool call are consumed with that call. They do not create another
+call or alter its arguments. Other orphan markers and malformed arguments remain
+errors. E4B and the public codec retain strict terminator handling.
+
 ## Streaming and cancellation
 
 Speech with `stream: true` returns `application/x-ndjson`. Each `audio` event

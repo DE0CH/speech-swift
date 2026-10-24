@@ -144,6 +144,6 @@ public final class Gemma4UnifiedChat: @unchecked Sendable {
                                             generatedTokenIDs: generated, rawOutput: raw,
                                             stopTokenID: stopTokenID,
                                             finishReason: stopTokenID == nil ? "length" : "stop"))
-        return try Gemma4ToolCodec.response(raw, generatedTokens: generated.count)
+        return try Gemma4ToolCodec.response(raw, generatedTokens: generated.count, allowRepeatedToolTerminators: true)
     }
 }

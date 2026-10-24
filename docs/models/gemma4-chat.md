@@ -31,8 +31,10 @@ let reply = try chat.generateResponse(
 Native tool declarations, calls, and result history use `Gemma4Tool` and
 `Gemma4ConversationMessage`. Response parsing removes channel delimiters from
 returned text, including a closing marker generated after a tool result. Tool
-argument strings retain their original values. Orphaned tool-call terminators
-are rejected as malformed responses. Cancellation is cooperative. Prefill evaluates
+argument strings retain their original values. For 12B, repeated adjacent
+terminators immediately after a fully validated call are consumed with that
+call. Standalone terminators, incomplete calls, and invalid arguments remain
+errors. The public codec and E4B keep strict terminator handling. Cancellation is cooperative. Prefill evaluates
 256-token batches and each request owns its KV cache. This interface provides
 buffered text/tool responses; it rejects constrained response formats. Vision
 and audio input use other modules and are outside this text interface.

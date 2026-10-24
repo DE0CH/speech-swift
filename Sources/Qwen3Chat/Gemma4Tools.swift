@@ -210,6 +210,12 @@ public enum Gemma4ToolCodec {
 
     /// Parse all native call blocks without evaluating generated code.
     public static func response(_ raw: String, generatedTokens: Int = 0) throws -> Gemma4Response {
+        try response(raw, generatedTokens: generatedTokens, allowRepeatedToolTerminators: false)
+    }
+
+    /// Some checkpoints repeat adjacent closing markers after an otherwise complete call.
+    static func response(_ raw: String, generatedTokens: Int,
+                         allowRepeatedToolTerminators: Bool) throws -> Gemma4Response {
         var text = raw
         while let open = text.range(of: "<|channel>") {
             guard let close = text.range(of: "<channel|>", range: open.upperBound..<text.endIndex) else {
@@ -240,7 +246,13 @@ public enum Gemma4ToolCodec {
             let arguments = try parser.parse()
             guard case .object = arguments else { throw Gemma4ToolError.malformed("arguments must be an object") }
             calls.append(.init(name: name, arguments: arguments))
-            text.removeSubrange(start.lowerBound..<end.upperBound)
+            var consumedEnd = end.upperBound
+            if allowRepeatedToolTerminators {
+                while text[consumedEnd...].hasPrefix("<tool_call|>") {
+                    consumedEnd = text.index(consumedEnd, offsetBy: "<tool_call|>".count)
+                }
+            }
+            text.removeSubrange(start.lowerBound..<consumedEnd)
         }
         guard !text.contains("<tool_call|>") else {
             throw Gemma4ToolError.malformed("orphan tool call terminator")

@@ -2,6 +2,37 @@ import XCTest
 @testable import Qwen3Chat
 
 final class Gemma4ToolsTests: XCTestCase {
+    func testRepeatedAdjacentTerminatorsRequireExplicitCheckpointCompatibility() throws {
+        let raw = "<|tool_call>call:read_record{id:<|\"|>rec_3<|\"|>}<tool_call|><tool_call|>"
+        XCTAssertThrowsError(try Gemma4ToolCodec.response(raw))
+        let reply = try Gemma4ToolCodec.response(raw, generatedTokens: 23, allowRepeatedToolTerminators: true)
+        XCTAssertEqual(reply.toolCalls.count, 1)
+        XCTAssertEqual(reply.toolCalls[0].name, "read_record")
+        XCTAssertEqual(reply.toolCalls[0].arguments, .object(["id": .string("rec_3")]))
+        XCTAssertEqual(reply.generatedTokens, 23)
+        XCTAssertEqual(reply.content, "")
+    }
+
+    func testRepeatedTerminatorsPreserveMultipleValidatedCallsAndStringValues() throws {
+        let raw = "<|tool_call>call:first{text:<|\"|>a,b}: café<|\"|>}<tool_call|><tool_call|><tool_call|><|tool_call>call:second{ok:true}<tool_call|><tool_call|>"
+        let reply = try Gemma4ToolCodec.response(raw, generatedTokens: 0, allowRepeatedToolTerminators: true)
+        XCTAssertEqual(reply.toolCalls.map(\.name), ["first", "second"])
+        XCTAssertEqual(reply.toolCalls[0].arguments, .object(["text": .string("a,b}: café")]))
+        XCTAssertEqual(reply.toolCalls[1].arguments, .object(["ok": .bool(true)]))
+        XCTAssertEqual(reply.content, "")
+    }
+
+    func testCheckpointCompatibilityStillRejectsOrphansAndInvalidArguments() throws {
+        let valid = "<|tool_call>call:read_record{}<tool_call|>"
+        for raw in ["<tool_call|>", "done<tool_call|>", "<tool_call|>" + valid,
+                    valid + "}<tool_call|>", valid + " <tool_call|>",
+                    "<|tool_call>call:read_record{id:rec_3}<tool_call|><tool_call|>",
+                    "<|tool_call>call:read_record{id:<|\"|>unfinished}<tool_call|><tool_call|>",
+                    "<|tool_call>call:read_record{"] {
+            XCTAssertThrowsError(try Gemma4ToolCodec.response(raw, generatedTokens: 0, allowRepeatedToolTerminators: true), raw)
+        }
+    }
+
     func testOrphanToolCallTerminatorIsRejectedBeforeSpeech() throws {
         for raw in ["}<tool_call|>", "}<tool_call|>}<tool_call|>",
                     "<|tool_call>call:lookup{}<tool_call|>}<tool_call|>"] {
