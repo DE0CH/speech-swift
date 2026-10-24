@@ -227,6 +227,15 @@ let tts = try await KokoroTTSModel.fromPretrained(computeUnits: .cpuAndGPU)
 
 The G2P encoder/decoder always run on CPU regardless of this setting; they are small enough that CPU is the fastest path.
 
+## Warm-up
+
+A model's first prediction is several times slower than the ones after it, so `fromPretrained` runs one short synthesis before it returns. On an M5 Pro this adds about 0.55 s to loading, and the first sentence after loading takes about 0.13 s instead of 0.5–0.8 s. Pass `warmUp: false` to skip it, for example when the model is only being downloaded, and call `warmUp()` before the first reply:
+
+```swift
+let tts = try await KokoroTTSModel.fromPretrained(warmUp: false)
+try tts.warmUp()
+```
+
 ## Conversion
 
 ```bash

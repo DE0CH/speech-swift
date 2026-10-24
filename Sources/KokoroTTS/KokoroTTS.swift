@@ -334,6 +334,10 @@ public final class KokoroTTSModel {
     // MARK: - Warmup
 
     /// Warm up CoreML model by running a dummy inference.
+    ///
+    /// A model's first prediction is several times slower than the ones after
+    /// it. `fromPretrained` calls this before returning unless `warmUp` is
+    /// false; a model loaded that way can be warmed up here later.
     public func warmUp() throws {
         let voice = voiceEmbeddings[Self.defaultVoice] != nil ? Self.defaultVoice : (availableVoices.first ?? Self.defaultVoice)
         _ = try? synthesize(text: "hello", voice: voice)
@@ -347,6 +351,9 @@ public final class KokoroTTSModel {
     ///   Defaults to `.all` (Neural Engine preferred). Pass `.cpuAndGPU` to bypass
     ///   the Neural Engine — useful as a fallback on platforms where the ANE
     ///   compiler produces incorrect output for this model.
+    /// - Parameter warmUp: Run one short synthesis before returning, so the
+    ///   first call is as fast as later ones. Pass `false` to load without it,
+    ///   for example when the model is only being downloaded.
     public static func fromPretrained(
         modelId: String = defaultModelId,
         voice: String = defaultVoice,
@@ -354,6 +361,7 @@ public final class KokoroTTSModel {
         offlineMode: Bool = false,
         computeUnits: MLComputeUnits = .all,
         downloadOptions: DownloadOptions = .init(),
+        warmUp: Bool = true,
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> KokoroTTSModel {
         AudioLog.modelLoading.info("Loading Kokoro model: \(modelId)")
@@ -424,12 +432,20 @@ public final class KokoroTTSModel {
         let network = try KokoroNetwork(directory: cacheDir, computeUnits: computeUnits)
         AudioLog.modelLoading.debug("Loaded Kokoro E2E model")
 
-        progressHandler?(1.0, "Model loaded")
-        AudioLog.modelLoading.info("Kokoro model loaded successfully")
-
-        return KokoroTTSModel(
+        let model = KokoroTTSModel(
             config: .default, network: network,
             phonemizer: phonemizer, voiceEmbeddings: voiceEmbeddings)
+
+        // The first prediction pays CoreML's one-time setup; take it here
+        // rather than on the caller's first reply.
+        if warmUp {
+            progressHandler?(0.95, "Warming up...")
+            try model.warmUp()
+        }
+
+        progressHandler?(1.0, "Model loaded")
+        AudioLog.modelLoading.info("Kokoro model loaded successfully")
+        return model
     }
 
     /// Load voice embedding from JSON file.
