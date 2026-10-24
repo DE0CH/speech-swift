@@ -72,6 +72,27 @@ final class E2EKokoroTests: XCTestCase {
         XCTAssertTrue(transcription.contains("launch"), "The last sentence must be spoken")
     }
 
+    func testFirstSynthesisAfterLoadIsWarm() async throws {
+        // fromPretrained warms the model up, so the first reply costs what
+        // later ones do. Without it the first call is 3-6x slower.
+        let bundles = [
+            (KokoroTTSModel.defaultModelId, "af_heart", "en", "Hello there, how are you today?"),
+            (KokoroTTSModel.germanMartinModelId, "dm_martin", "de", "Guten Tag, wie geht es Ihnen?"),
+        ]
+        for (modelId, voice, language, text) in bundles {
+            let m = try await KokoroTTSModel.fromPretrained(modelId: modelId)
+            func seconds() throws -> Double {
+                let t0 = CFAbsoluteTimeGetCurrent()
+                _ = try m.synthesize(text: text, voice: voice, language: language)
+                return CFAbsoluteTimeGetCurrent() - t0
+            }
+            let first = try seconds()
+            let warm = try (0..<3).map { _ in try seconds() }.sorted()[1]
+            print("\(modelId): first synthesis \(String(format: "%.3f", first)) s, warm \(String(format: "%.3f", warm)) s")
+            XCTAssertLessThan(first, warm * 2.5, "\(modelId): the first synthesis after loading was not warm")
+        }
+    }
+
     func testTextThatFitsOnePassStreamsAsOneChunk() async throws {
         // Text within one chunk's budget renders in one call.
         let m = try await model()
