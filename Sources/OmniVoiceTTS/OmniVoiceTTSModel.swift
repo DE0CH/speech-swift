@@ -61,6 +61,7 @@ public final class OmniVoiceTTSModel {
     public static func fromPretrained(
         modelId: String = defaultModelId,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> OmniVoiceTTSModel {
         let dir = try HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -88,7 +89,8 @@ public final class OmniVoiceTTSModel {
                 additionalFiles: [
                     "config.json", "tokenizer.json", "tokenizer_config.json", "audio_tokenizer/*",
                 ],
-                offlineMode: offlineMode
+                offlineMode: offlineMode,
+                downloadOptions: downloadOptions
             ) { progressHandler?($0 * 0.9, "Downloading model...") }
         }
         progressHandler?(0.92, "Loading weights...")

@@ -67,6 +67,7 @@ public final class MADLADTranslator: @unchecked Sendable {
         quantization: Quantization = .int4,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> MADLADTranslator {
         let cacheDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -84,6 +85,7 @@ public final class MADLADTranslator: @unchecked Sendable {
                 "\(variant)/special_tokens_map.json",
             ],
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { progress in
                 progressHandler?(progress * 0.5, "Downloading...")
             }

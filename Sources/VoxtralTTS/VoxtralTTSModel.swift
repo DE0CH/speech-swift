@@ -97,6 +97,7 @@ public final class VoxtralTTSModel: SpeechGenerationModel, @unchecked Sendable {
         modelId: String = defaultModelId,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> VoxtralTTSModel {
         try Task.checkCancellation()
@@ -104,7 +105,7 @@ public final class VoxtralTTSModel: SpeechGenerationModel, @unchecked Sendable {
         // Preset embeddings are required assets outside the backbone's weight index.
         try await HuggingFaceDownloader.downloadFiles(modelId: modelId, to: directory,
             files: bundleFiles,
-            offlineMode: offlineMode, progressHandler: { progressHandler?($0, "Downloading Voxtral TTS") })
+            offlineMode: offlineMode, downloadOptions: downloadOptions, progressHandler: { progressHandler?($0, "Downloading Voxtral TTS") })
         try Task.checkCancellation()
         return try fromBundle(directory)
     }

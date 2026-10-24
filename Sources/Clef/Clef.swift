@@ -20,12 +20,14 @@ public final class Clef {
     }
 
     public static func fromPretrained(cacheDir: URL? = nil, offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil) async throws -> Clef {
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: defaultModelID)
         let files = ["config.json", "tokenizer.json", "tokenizer_config.json", "model.safetensors",
                      "joint_head.safetensors", "joint_head_config.json", "LICENSE"]
         try await HuggingFaceDownloader.downloadFiles(modelId: defaultModelID, to: directory,
             files: files, offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { progressHandler?($0 * 0.8, "Downloading Clef-flash") })
         return try load(from: directory, progressHandler: progressHandler)
     }

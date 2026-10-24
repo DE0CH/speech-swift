@@ -262,6 +262,7 @@ public final class ChatterboxTTSModel {
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
         conformerWeights: URL? = nil,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> ChatterboxTTSModel {
         let bundleDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -287,14 +288,16 @@ public final class ChatterboxTTSModel {
             try await HuggingFaceDownloader.downloadWeights(
                 modelId: modelId, to: bundleDir,
                 additionalFiles: ["config.json", "tokenizer.json", "Cangjie5_TC.json"],
-                offlineMode: offlineMode
+                offlineMode: offlineMode,
+                downloadOptions: downloadOptions
             ) { progressHandler?($0 * 0.7, "Downloading model...") }
         }
         if !fm.fileExists(atPath: tokenizerDir.appendingPathComponent("model.safetensors").path) {
             progressHandler?(0.7, "Downloading S3 tokenizer...")
             try await HuggingFaceDownloader.downloadWeights(
                 modelId: s3TokenizerModelId, to: tokenizerDir,
-                offlineMode: offlineMode
+                offlineMode: offlineMode,
+                downloadOptions: downloadOptions
             ) { progressHandler?(0.7 + $0 * 0.2, "Downloading tokenizer...") }
         }
 

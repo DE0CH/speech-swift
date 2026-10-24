@@ -91,10 +91,11 @@ public final class MAGNeTMusicGen {
 
     public static func fromPretrained(
         variant: MAGNeTVariant,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> MAGNeTMusicGen {
         let paths = try await MAGNeTDownloader.ensureDownloaded(
-            variant: variant, progressHandler: progressHandler)
+            variant: variant, downloadOptions: downloadOptions, progressHandler: progressHandler)
 
         // MAGNeT bundle.
         let cfg = try MAGNeTConfig.load(from: paths.bundleDir.appendingPathComponent("config.json"))

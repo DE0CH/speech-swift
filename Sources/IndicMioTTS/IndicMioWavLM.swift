@@ -361,6 +361,7 @@ public final class IndicMioWavLMFeatureModel: Module {
         modelId: String = defaultModelId,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> IndicMioWavLMFeatureModel {
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -369,6 +370,7 @@ public final class IndicMioWavLMFeatureModel: Module {
             to: directory,
             additionalFiles: ["config.json", "model.safetensors"],
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { progressHandler?($0, "Downloading WavLM reference encoder") })
         return try fromBundle(directory)
     }

@@ -59,6 +59,7 @@ public final class OmnilingualASRMLXModel {
         modelId: String? = nil,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> OmnilingualASRMLXModel {
         let resolvedModelId = modelId ?? OmnilingualMLXConfig.defaultModelId(
@@ -83,7 +84,8 @@ public final class OmnilingualASRMLXModel {
                 modelId: resolvedModelId,
                 to: resolvedCacheDir,
                 additionalFiles: ["config.json", "tokenizer.model", "model.safetensors"],
-                offlineMode: offlineMode
+                offlineMode: offlineMode,
+                downloadOptions: downloadOptions
             ) { fraction in
                 progressHandler?(fraction * 0.85, "Downloading weights...")
             }

@@ -118,6 +118,7 @@ public final class Qwen35MLXChat: @unchecked Sendable {
         quantization: Quantization = defaultQuantization,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> Qwen35MLXChat {
         let cacheDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -135,6 +136,7 @@ public final class Qwen35MLXChat: @unchecked Sendable {
                 "\(variant)/tokenizer_config.json",
             ],
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { progress in
                 progressHandler?(progress * 0.5, "Downloading...")
             }

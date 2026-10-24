@@ -180,6 +180,7 @@ public extension VoxtralModel {
     static func load(
         _ modelPath: String = defaultModelId,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> VoxtralModel {
         var isDirectory: ObjCBool = false
@@ -190,6 +191,7 @@ public extension VoxtralModel {
         return try await fromPretrained(
             modelPath,
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: progressHandler)
     }
 
@@ -197,6 +199,7 @@ public extension VoxtralModel {
         _ modelId: String = defaultModelId,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> VoxtralModel {
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -205,6 +208,7 @@ public extension VoxtralModel {
             to: directory,
             additionalFiles: downloadAdditionalFiles,
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: progressHandler)
         return try fromDirectory(directory)
     }

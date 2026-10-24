@@ -52,6 +52,7 @@ public final class Audio2Face3DModel: @unchecked Sendable {
         backend: Audio2Face3DBackend = .mlx,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> Audio2Face3DModel {
         var configuration = Audio2Face3DConfiguration(modelId: modelId)
@@ -60,7 +61,8 @@ public final class Audio2Face3DModel: @unchecked Sendable {
         try await Audio2Face3DDownloader.ensureDownloaded(
             modelId: modelId,
             to: dir,
-            offlineMode: offlineMode
+            offlineMode: offlineMode,
+            downloadOptions: downloadOptions
         ) { progress, _, _, file in
             progressHandler?(progress * 0.90, file.isEmpty ? "Downloading Audio2Face-3D..." : "Downloading \(file)...")
         }

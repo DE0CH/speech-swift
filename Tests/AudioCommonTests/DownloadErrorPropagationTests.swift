@@ -1,5 +1,6 @@
 import CryptoKit
 import Network
+import os
 import XCTest
 @testable import AudioCommon
 
@@ -146,21 +147,25 @@ final class DownloadErrorPropagationTests: XCTestCase {
 
         func download(
             modelId: String, to directory: URL, files: [String] = ["model.safetensors"],
+            downloadOptions: DownloadOptions = .init(),
             progress: ((Double) -> Void)? = nil
         ) async throws {
             switch self {
             case .weights:
                 try await HuggingFaceDownloader.downloadWeights(
                     modelId: modelId, to: directory, additionalFiles: files,
-                    retryDelaysSeconds: [0], progressHandler: progress)
+                    retryDelaysSeconds: [0], downloadOptions: downloadOptions,
+                    progressHandler: progress)
             case .files:
                 try await HuggingFaceDownloader.downloadFiles(
                     modelId: modelId, to: directory, files: files,
-                    retryDelaysSeconds: [0], progressHandler: progress)
+                    retryDelaysSeconds: [0], downloadOptions: downloadOptions,
+                    progressHandler: progress)
             case .byteWeighted:
                 try await HuggingFaceDownloader.downloadFilesByteWeighted(
                     modelId: modelId, to: directory, files: files,
                     retryDelaysSeconds: [0],
+                    downloadOptions: downloadOptions,
                     progressHandler: { fraction, _, _, _ in progress?(fraction) })
             }
         }
@@ -189,8 +194,27 @@ final class DownloadErrorPropagationTests: XCTestCase {
             for entryPoint in EntryPoint.allCases {
                 let directory = try makeScratch(complete: true)
                 var progress = 0.0
-                try await entryPoint.download(modelId: modelId, to: directory) { progress = $0 }
+                let events = OSAllocatedUnfairLock(initialState: [DownloadRetryEvent]())
+                try await entryPoint.download(
+                    modelId: modelId, to: directory,
+                    downloadOptions: .init(onRetry: { event in
+                        events.withLock { $0.append(event) }
+                    })
+                ) { progress = $0 }
                 XCTAssertEqual(progress, 1.0, "\(entryPoint)")
+                let reported = events.withLock { $0 }
+                XCTAssertEqual(reported.map(\.attempt), [1, 2])
+                XCTAssertEqual(reported.map(\.maxAttempts), [2, 2])
+                XCTAssertEqual(reported.map(\.retryInSeconds), [0, nil])
+                for event in reported {
+                    guard let failure = event.error as? DownloadError,
+                          case .stalled(let id, let seconds) = failure else {
+                        XCTFail("Expected the original stall error")
+                        continue
+                    }
+                    XCTAssertEqual(id, modelId)
+                    XCTAssertEqual(seconds, 1)
+                }
                 let cached = try Data(contentsOf: directory.appendingPathComponent("model.safetensors"))
                 XCTAssertEqual(cached, Data("cached weights".utf8))
             }
@@ -263,8 +287,13 @@ final class DownloadErrorPropagationTests: XCTestCase {
     func testHTTPFailureDoesNotUseCacheForEveryEntryPoint() async throws {
         try await withHub(.notFound) {
             for entryPoint in EntryPoint.allCases {
+                let events = OSAllocatedUnfairLock(initialState: [DownloadRetryEvent]())
                 do {
-                    try await entryPoint.download(modelId: modelId, to: makeScratch(complete: true))
+                    try await entryPoint.download(
+                        modelId: modelId, to: makeScratch(complete: true),
+                        downloadOptions: .init(onRetry: { event in
+                            events.withLock { $0.append(event) }
+                        }))
                     XCTFail("\(entryPoint) hid an HTTP rejection with cached files")
                 } catch let error as DownloadError {
                     guard case .failedToDownload(let detail) = error else {
@@ -272,6 +301,19 @@ final class DownloadErrorPropagationTests: XCTestCase {
                         continue
                     }
                     XCTAssertTrue(detail.contains("HTTP 404"))
+                }
+                let reported = events.withLock { $0 }
+                XCTAssertEqual(reported.map(\.attempt), [1, 2])
+                XCTAssertEqual(reported.map(\.retryInSeconds), [0, nil])
+                for event in reported {
+                    guard let failure = event.error as? DownloadError,
+                          case .failedToDownload(let detail) = failure else {
+                        XCTFail("Expected the original HTTP error")
+                        continue
+                    }
+                    XCTAssertTrue(detail.contains("HTTP 404"))
+                    XCTAssertFalse(detail.contains("after 2 attempts"))
+                    XCTAssertFalse(detail.contains("target:"))
                 }
             }
         }
