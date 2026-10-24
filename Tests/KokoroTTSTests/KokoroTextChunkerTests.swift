@@ -18,6 +18,27 @@ final class KokoroTextChunkerTests: XCTestCase {
         KokoroTextChunker.splitForRetry(text, countTokens: count, minTokens: min, maxTokens: max)
     }
 
+    // MARK: - Synthesizer plan
+
+    func testPlanKeepsShortTextWhole() {
+        let text = "Hello there. How are you today?"
+        XCTAssertEqual(KokoroTTSModel.chunkPlan(text, countTokens: count), [text])
+    }
+
+    func testPlanMergesShortTailWithinHardCap() {
+        let a = "I moved the planning meeting with the design team to Thursday."
+        XCTAssertEqual(count(a), 54)
+        // 54 + "See you." is 61 tokens: past the 56 budget, within the 64 cap.
+        XCTAssertEqual(KokoroTTSModel.chunkPlan(a + " See you.", countTokens: count), [a + " See you."])
+    }
+
+    func testPlanKeepsTailWhenMergeExceedsHardCap() {
+        let a = "I moved the planning meetings with the design teams to Thursday."
+        XCTAssertEqual(count(a), 56)
+        // Merged with "Thank you." it would be 65 tokens, past the 64 cap.
+        XCTAssertEqual(KokoroTTSModel.chunkPlan(a + " Thank you.", countTokens: count), [a, "Thank you."])
+    }
+
     // MARK: - Packing
 
     func testEmptyAndWhitespace() {
