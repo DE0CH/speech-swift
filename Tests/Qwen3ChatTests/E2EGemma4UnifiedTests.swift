@@ -18,6 +18,9 @@ final class E2EGemma4UnifiedTests: XCTestCase {
         Memory.cacheLimit = 128 * 1024 * 1024
         Memory.memoryLimit = 20 * 1024 * 1024 * 1024
         let chat = try Gemma4UnifiedChat.fromDirectory(URL(fileURLWithPath: folder))
+        guard chat.prefixCacheBudgetBytes > 0 else {
+            throw XCTSkip("Enable the Gemma system prefix cache for this parity check")
+        }
         let tools = [Gemma4Tool(name: "record_note", description: "Record the exact text of a note.",
                                parameters: .object(["type": .string("object"),
                                                     "properties": .object(["text": .object(["type": .string("string")])]),
@@ -29,8 +32,8 @@ final class E2EGemma4UnifiedTests: XCTestCase {
         let sampling = ChatSamplingConfig(temperature: 0, maxTokens: 128, repetitionPenalty: 1)
         var traces: [Gemma4GenerationTrace] = []
         var responses: [Gemma4Response] = []
-        // Reversing the order on the second pair separates initialization cost
-        // from repeated prompt evaluation. Every request starts a fresh cache.
+        // Compare a cold optimized request and a warm prefix hit against the
+        // former implementation on both sides of the pair.
         for strategy in [Gemma4PrefillStrategy.fullLogits, .cacheOnly, .cacheOnly, .fullLogits] {
             Memory.clearCache()
             let capture = Capture()
@@ -40,7 +43,7 @@ final class E2EGemma4UnifiedTests: XCTestCase {
                                                        prefillStrategy: strategy)
             let trace = try XCTUnwrap(capture.trace)
             XCTAssertGreaterThan(trace.promptTokenIDs.count, 4096)
-            print("Gemma4 prefill \(strategy): \(trace.promptTokenIDs.count) prompt tokens, \(trace.generatedTokenIDs.count) generated tokens, \(Date().timeIntervalSince(started)) seconds")
+            print("Gemma4 prefill \(strategy): \(trace.promptTokenIDs.count) prompt tokens, \(chat.lastCachedPrefixTokens) cached tokens, \(chat.prefixCacheCandidateBytes) prefix bytes / \(chat.prefixCacheBudgetBytes) budget, \(trace.generatedTokenIDs.count) generated tokens, \(Date().timeIntervalSince(started)) seconds")
             XCTAssertEqual(response.toolCalls.count, 1)
             let call = try XCTUnwrap(response.toolCalls.first)
             XCTAssertEqual(call.name, "record_note")
@@ -54,6 +57,32 @@ final class E2EGemma4UnifiedTests: XCTestCase {
             XCTAssertEqual(traces[index].rawOutput, traces[0].rawOutput)
             XCTAssertEqual(responses[index].content, responses[0].content)
         }
+        XCTAssertGreaterThan(chat.cachedPrefixTokenCount, 4096)
+        XCTAssertEqual(chat.prefixCacheHits, 1)
+
+        let otherMessages = [messages[0], Gemma4ConversationMessage(role: .user,
+            content: "Background context, excluded from the saved note: " +
+                String(repeating: "Routine scheduling information is provided for context only. ", count: 150) +
+                "\nSave a note with the exact text: second review")]
+        let reusedCapture = Capture()
+        let reused = try chat.generateResponse(messages: otherMessages, tools: tools, sampling: sampling,
+                                               cancellation: nil, onGeneration: { reusedCapture.store($0) })
+        XCTAssertGreaterThan(chat.lastCachedPrefixTokens, 4096)
+        XCTAssertEqual(reused.toolCalls.first?.arguments, ChatJSONValue.object(["text": .string("second review")]))
+        let uncachedCapture = Capture()
+        let uncached = try chat.generateResponse(messages: otherMessages, tools: tools, sampling: sampling,
+                                                cancellation: nil, onGeneration: { uncachedCapture.store($0) }, prefillStrategy: .fullLogits)
+        XCTAssertEqual(reused.content, uncached.content)
+        XCTAssertEqual(reused.toolCalls.map(\.arguments), uncached.toolCalls.map(\.arguments))
+        XCTAssertEqual(try XCTUnwrap(reusedCapture.trace).generatedTokenIDs, try XCTUnwrap(uncachedCapture.trace).generatedTokenIDs)
+        let repeatedCapture = Capture()
+        let repeated = try chat.generateResponse(messages: messages, tools: tools, sampling: sampling,
+                                                 cancellation: nil, onGeneration: { repeatedCapture.store($0) })
+        XCTAssertGreaterThan(chat.lastCachedPrefixTokens, 4096)
+        XCTAssertEqual(repeated.toolCalls.map(\.arguments), responses[0].toolCalls.map(\.arguments))
+        XCTAssertEqual(try XCTUnwrap(repeatedCapture.trace).generatedTokenIDs, traces[0].generatedTokenIDs)
+        chat.clearPrefixCache()
+        XCTAssertEqual(chat.cachedPrefixTokenCount, 0)
     }
 
     func testCompletionTraceSurvivesMalformedToolOutput() throws {
