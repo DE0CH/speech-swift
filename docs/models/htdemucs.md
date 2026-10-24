@@ -4,8 +4,7 @@ State-of-the-art music source separation. Splits stereo music into 4 stems
 (drums, bass, other, vocals) — substantially higher separation quality than
 Open-Unmix. On a directional benchmark (3 MUSDB *sample* clips, museval /
 BSSEval v4) `htdemucs_ft` averages **+3.01 dB SDR** over UMX-HQ, with the
-largest gains on bass (**+5.75 dB**) and drums (**+2.40 dB**). Reproduce with
-`benchmark.py` in the `speech-models` repo.
+largest gains on bass (**+5.75 dB**) and drums (**+2.40 dB**).
 
 ## Architecture
 

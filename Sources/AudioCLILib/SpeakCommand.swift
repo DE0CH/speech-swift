@@ -1973,7 +1973,7 @@ public struct SpeakCommand: ParsableCommand {
                     }
                 } else {
                     print("  No speech_tokenizer.safetensors in bundle — falling back to spk-only cloning (cap ≈ cos 0.83).")
-                    print("    Re-export the bundle with `convert_speech_tokenizer` (speech-models) to enable.")
+                    print("    A bundle that includes speech_tokenizer.safetensors enables it.")
                 }
             }
 
