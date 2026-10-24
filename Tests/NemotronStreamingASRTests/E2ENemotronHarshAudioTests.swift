@@ -137,8 +137,8 @@ final class E2ENemotronHarshAudioTests: XCTestCase {
     /// Why this shape, not overlapped voices: the topology investigation
     /// (workflow `nemotron-streaming-chunker-fix`) confirmed the encoder's
     /// CoreML graph already incorporates `rightContext` via the streaming
-    /// caches (`keep_all_outputs=False` trim at export time, see
-    /// `speech-models/.../convert.py:172`). The Swift chunker feeding
+    /// caches (`keep_all_outputs=False` trim at export time). The Swift
+    /// chunker feeding
     /// `chunk_size` frames with no audio overlap is exactly what the model
     /// was trained for. Overlapped two-voice fixtures conflate chunker
     /// correctness (this test) with model difficulty on multi-speaker audio
