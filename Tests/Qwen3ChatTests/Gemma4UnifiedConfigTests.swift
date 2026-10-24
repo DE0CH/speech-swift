@@ -3,6 +3,30 @@ import XCTest
 @testable import Qwen3Chat
 
 final class Gemma4UnifiedConfigTests: XCTestCase {
+    func testJSONToolResponseMatchesCheckpointTextEncodingWithoutChangingLegacyPrompt() throws {
+        let call = Gemma4ToolCall(id: "read-1", name: "read_record", arguments: .object(["id": .string("rec_2")]))
+        let messages: [Gemma4ConversationMessage] = [
+            .init(role: .user, content: "Read rec_2."),
+            .init(role: .assistant, toolCalls: [call]),
+            .init(role: .tool, content: "{\"id\":\"rec_2\",\"optional\":null}", toolCallID: call.id)]
+        let prompt = try Gemma4UnifiedChat.prompt(messages: messages, tools: [])
+        XCTAssertTrue(prompt.hasSuffix("<|tool_response>response:read_record{value:<|\"|>{\"id\":\"rec_2\",\"optional\":null}<|\"|>}<tool_response|>"))
+        XCTAssertFalse(prompt.hasSuffix("<|turn>model\n"))
+        let legacy = try Gemma4ToolCodec.prompt(messages: messages)
+        XCTAssertTrue(legacy.hasSuffix("<|tool_response>response:read_record{id:<|\"|>rec_2<|\"|>,optional:null}<tool_response|>"))
+    }
+
+    func testToolResponseArraysScalarsAndWhitespaceRemainText() throws {
+        for body in ["[{\"id\":1}]", "null", "\"quoted text\"", "  plain text\n"] {
+            let call = Gemma4ToolCall(id: "read", name: "read_record", arguments: .object([:]))
+            let prompt = try Gemma4UnifiedChat.prompt(messages: [
+                .init(role: .user, content: "Read the record."),
+                .init(role: .assistant, toolCalls: [call]),
+                .init(role: .tool, content: body, toolCallID: call.id)], tools: [])
+            XCTAssertTrue(prompt.hasSuffix("<|tool_response>response:read_record{value:<|\"|>\(body)<|\"|>}<tool_response|>"))
+        }
+    }
+
     func testGenerationPrefixDisablesThinkingWithoutChangingToolContinuation() throws {
         let prompt = try Gemma4UnifiedChat.prompt(messages: [.init(role: .user, content: "Hello")], tools: [])
         XCTAssertTrue(prompt.hasSuffix("<|turn>model\n<|channel>thought\n<channel|>"))

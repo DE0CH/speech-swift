@@ -54,7 +54,7 @@ public final class Gemma4UnifiedChat: @unchecked Sendable {
     }
 
     static func prompt(messages: [Gemma4ConversationMessage], tools: [Gemma4Tool]) throws -> String {
-        var prompt = try Gemma4ToolCodec.prompt(messages: messages, tools: tools)
+        var prompt = try Gemma4ToolCodec.prompt(messages: messages, tools: tools, preserveToolResponseText: true)
         // Match the checkpoint's enable_thinking=false generation prefix.
         if prompt.hasSuffix("<|turn>model\n") { prompt += "<|channel>thought\n<channel|>" }
         return prompt
