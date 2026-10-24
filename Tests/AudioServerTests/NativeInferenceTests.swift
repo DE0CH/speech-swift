@@ -10,9 +10,22 @@ final class NativeInferenceTests: XCTestCase {
 
     func testRejectsModelSubstitutionsAndInvalidRequests() throws {
         XCTAssertNoThrow(try request([:]).validate())
+        XCTAssertNoThrow(try request(["model": "gemma4-12b-it"]).validate())
         for fields: [String: Any] in [["model": "other"], ["requestID": ""], ["messages": []], ["maxTokens": 0], ["temperature": -1]] {
             XCTAssertThrowsError(try request(fields).validate())
         }
+    }
+
+    func testOptionalAgentDirectoryPreservesExistingManifest() throws {
+        var manifest: [String: Any] = ["runtimeRevision": "test", "gemmaDirectory": "/gemma",
+                                     "voxDirectory": "/vox", "whisperDirectory": "/whisper", "vadDirectory": "/vad"]
+        let original = try JSONDecoder().decode(NativeInferenceConfiguration.self,
+                                                from: JSONSerialization.data(withJSONObject: manifest))
+        XCTAssertNil(original.agentDirectory)
+        manifest["agentDirectory"] = "/gemma12b"
+        let expanded = try JSONDecoder().decode(NativeInferenceConfiguration.self,
+                                                from: JSONSerialization.data(withJSONObject: manifest))
+        XCTAssertEqual(expanded.agentDirectory, "/gemma12b")
     }
 
     func testAudioDecodingAndVADFrameValidation() throws {

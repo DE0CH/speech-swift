@@ -735,6 +735,7 @@ let package = Package(
                 "AudioCommon",
                 "MLXCommon",
                 "CXGrammarBridge",
+                .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
