@@ -31,8 +31,10 @@ let reply = try chat.generateResponse(
 Native tool declarations, calls, and result history use `Gemma4Tool` and
 `Gemma4ConversationMessage`. Response parsing removes channel delimiters from
 returned text, including a closing marker generated after a tool result. Tool
-argument strings retain their original values. Orphaned tool-call terminators
-are rejected as malformed responses. Cancellation is cooperative. Prefill evaluates
+argument strings retain their original values. For 12B, repeated adjacent
+terminators immediately after a fully validated call are consumed with that
+call. Standalone terminators, incomplete calls, and invalid arguments remain
+errors. The public codec and E4B keep strict terminator handling. Cancellation is cooperative. Prefill evaluates
 256-token batches and each request owns its KV cache. This interface provides
 buffered text/tool responses; it rejects constrained response formats. Vision
 and audio input use other modules and are outside this text interface.
@@ -41,6 +43,14 @@ For 12B, `role: tool` content is wrapped verbatim as text in the native
 `response:name{value:...}` block, matching the checkpoint's standard chat
 template. JSON object, array, and scalar text keeps its original encoding.
 `Gemma4Chat` retains its existing structured JSON tool-response representation.
+
+`generateResponse` accepts an optional `onGeneration` callback for a
+`Gemma4GenerationTrace`. It runs after generation and before tool parsing, so a
+malformed completion remains available even when parsing throws. The trace
+contains the rendered prompt, prompt/generated token IDs, raw output, stop token
+ID, and `stop` or `length` finish reason. It is disabled by default and does not
+alter sampling or parser acceptance. See the native inference server guide for
+opt-in local failure files.
 
 The following architecture and streaming sections describe `Gemma4Chat` for
 E2B and E4B.

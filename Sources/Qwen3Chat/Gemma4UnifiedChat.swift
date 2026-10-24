@@ -5,6 +5,16 @@ import MLXCommon
 import MLXLLM
 import MLXLMCommon
 
+/// Opt-in completion details captured before native tool parsing.
+public struct Gemma4GenerationTrace: Codable, Sendable {
+    public let prompt: String
+    public let promptTokenIDs: [Int]
+    public let generatedTokenIDs: [Int]
+    public let rawOutput: String
+    public let stopTokenID: Int?
+    public let finishReason: String
+}
+
 /// Local Gemma 4 12B text inference with native tool declarations and result history.
 /// Uses the pinned MLX text implementation; calls on an instance must be serialized.
 public final class Gemma4UnifiedChat: @unchecked Sendable {
@@ -65,6 +75,17 @@ public final class Gemma4UnifiedChat: @unchecked Sendable {
         sampling: ChatSamplingConfig = .default,
         cancellation: InferenceCancellationToken? = nil
     ) throws -> Gemma4Response {
+        try generateResponse(messages: messages, tools: tools, sampling: sampling,
+                             cancellation: cancellation, onGeneration: nil)
+    }
+
+    /// Capture a completed generation before parsing, including malformed responses.
+    public func generateResponse(
+        messages: [Gemma4ConversationMessage], tools: [Gemma4Tool] = [],
+        sampling: ChatSamplingConfig = .default,
+        cancellation: InferenceCancellationToken? = nil,
+        onGeneration: (@Sendable (Gemma4GenerationTrace) -> Void)?
+    ) throws -> Gemma4Response {
         try cancellation?.checkCancellation()
         try Task.checkCancellation()
         guard sampling.responseFormat == nil else {
@@ -95,6 +116,7 @@ public final class Gemma4UnifiedChat: @unchecked Sendable {
         guard var nextLogits = logits else { throw ChatModelError.inferenceFailed("Empty prefill") }
         var history = tokens
         var generated: [Int] = []
+        var stopTokenID: Int?
         var produced = false
         var filter = Gemma4AnswerFilter(tokenizer: tokenizer)
         let ends = Array(tokenizer.eosTokenIds)
@@ -107,7 +129,7 @@ public final class Gemma4UnifiedChat: @unchecked Sendable {
                 previousTokens: history, vocabSize: model.vocabularySize,
                 uniform: sampling.temperature > 0 ? Float.random(in: 0..<1) : 0
             ).item(Int.self)
-            if tokenizer.eosTokenIds.contains(next) { break }
+            if tokenizer.eosTokenIds.contains(next) { stopTokenID = next; break }
             generated.append(next)
             history.append(next)
             if !filter.consume(next).isEmpty { produced = true }
@@ -117,7 +139,11 @@ public final class Gemma4UnifiedChat: @unchecked Sendable {
         }
         try cancellation?.checkCancellation()
         try Task.checkCancellation()
-        return try Gemma4ToolCodec.response(tokenizer.decodeWithSpecialTokens(generated),
-                                           generatedTokens: generated.count)
+        let raw = tokenizer.decodeWithSpecialTokens(generated)
+        onGeneration?(Gemma4GenerationTrace(prompt: prompt, promptTokenIDs: tokens,
+                                            generatedTokenIDs: generated, rawOutput: raw,
+                                            stopTokenID: stopTokenID,
+                                            finishReason: stopTokenID == nil ? "length" : "stop"))
+        return try Gemma4ToolCodec.response(raw, generatedTokens: generated.count, allowRepeatedToolTerminators: true)
     }
 }
