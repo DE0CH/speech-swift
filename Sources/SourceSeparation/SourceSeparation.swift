@@ -182,6 +182,7 @@ public final class SourceSeparator {
     /// Load pretrained Open-Unmix model from HuggingFace.
     public static func fromPretrained(
         modelId: String = defaultModelId,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> SourceSeparator {
         let config = modelId.contains("L-MLX") ? OpenUnmixConfig.umxl : OpenUnmixConfig.umxhq
@@ -206,7 +207,8 @@ public final class SourceSeparator {
                     "bass.safetensors",
                     "other.safetensors",
                     "config.json",
-                ]
+                ],
+                downloadOptions: downloadOptions
             ) { fraction in
                 progressHandler?(fraction * 0.7, "Downloading model...")
             }

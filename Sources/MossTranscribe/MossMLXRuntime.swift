@@ -92,12 +92,14 @@ public final class MossMLXModel:
         variant: MossMLXVariant = .int5,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> MossMLXModel {
         try await fromPretrained(
             modelId: variant.modelId,
             cacheDir: cacheDir,
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: progressHandler
         )
     }
@@ -106,6 +108,7 @@ public final class MossMLXModel:
         modelId: String = defaultModelId,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> MossMLXModel {
         let directory: URL
@@ -126,7 +129,8 @@ public final class MossMLXModel:
                 modelId: modelId,
                 to: directory,
                 additionalFiles: downloadAdditionalFiles,
-                offlineMode: offlineMode
+                offlineMode: offlineMode,
+                downloadOptions: downloadOptions
             ) { fraction in
                 progressHandler?(
                     fraction * 0.75,

@@ -433,6 +433,7 @@ public final class SpeechEnhancer {
         engine: SpeechEnhancerEngine? = nil,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> SpeechEnhancer {
         let resolvedEngine = engine
@@ -466,6 +467,7 @@ public final class SpeechEnhancer {
             to: cacheDir,
             additionalFiles: additionalFiles,
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { progress in
                 progressHandler?(progress * 0.8, "Downloading model...")
             }

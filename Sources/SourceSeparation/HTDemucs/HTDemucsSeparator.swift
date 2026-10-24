@@ -32,6 +32,7 @@ public final class HTDemucsSeparator {
     public static func fromPretrained(
         modelId: String = defaultModelId,
         precision: Precision = .fp16,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> HTDemucsSeparator {
         let cacheDir = try HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -39,7 +40,8 @@ public final class HTDemucsSeparator {
         progressHandler?(0.0, "Downloading \(name)...")
         try await HuggingFaceDownloader.downloadWeights(
             modelId: modelId, to: cacheDir,
-            additionalFiles: ["\(name).safetensors", "\(name)_config.json"]
+            additionalFiles: ["\(name).safetensors", "\(name)_config.json"],
+            downloadOptions: downloadOptions
         ) { f in progressHandler?(f * 0.9, "Downloading \(name)...") }
         progressHandler?(0.95, "Loading...")
         let sep = try fromLocal(directory: cacheDir, modelName: name)

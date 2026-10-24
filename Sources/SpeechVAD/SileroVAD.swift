@@ -249,6 +249,7 @@ public final class SileroVADModel {
         engine: SileroVADEngine = .mlx,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> SileroVADModel {
         let resolvedModelId = modelId ?? (engine == .coreml ? defaultCoreMLModelId : defaultModelId)
@@ -263,6 +264,7 @@ public final class SileroVADModel {
                 modelId: resolvedModelId,
                 to: cacheDir,
                 offlineMode: offlineMode,
+                downloadOptions: downloadOptions,
                 progressHandler: { progress in
                     progressHandler?(progress * 0.8, "Downloading weights...")
                 }
@@ -283,6 +285,7 @@ public final class SileroVADModel {
                 to: cacheDir,
                 additionalFiles: ["silero_vad.mlmodelc/**", "config.json"],
                 offlineMode: offlineMode,
+                downloadOptions: downloadOptions,
                 progressHandler: { progress in
                     progressHandler?(progress * 0.8, "Downloading CoreML model...")
                 }

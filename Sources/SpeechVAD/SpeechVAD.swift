@@ -53,6 +53,7 @@ public final class PyannoteVADModel {
         vadConfig: VADConfig = .default,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> PyannoteVADModel {
         progressHandler?(0.0, "Downloading model...")
@@ -63,6 +64,7 @@ public final class PyannoteVADModel {
             modelId: modelId,
             to: cacheDir,
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { progress in
                 progressHandler?(progress * 0.8, "Downloading weights...")
             }

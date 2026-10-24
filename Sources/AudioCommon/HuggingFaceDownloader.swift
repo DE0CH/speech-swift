@@ -142,12 +142,15 @@ public enum HuggingFaceDownloader {
     ///   final attempt's associated values after retries. Other failures and
     ///   offline cache misses use `.failedToDownload`. A stall or connectivity
     ///   failure can use a complete cache instead of throwing.
+    /// - Parameter downloadOptions: Retry delays and per-attempt observation.
+    ///   An explicit `retryDelaysSeconds` overrides the delays in these options.
     public static func downloadWeights(
         modelId: String,
         to directory: URL,
         additionalFiles: [String] = [],
         offlineMode: Bool = false,
         retryDelaysSeconds: [Int]? = nil,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws {
         if offlineMode {
@@ -177,6 +180,7 @@ public enum HuggingFaceDownloader {
                 modelId: modelId,
                 directory: directory,
                 retryDelaysSeconds: retryDelaysSeconds,
+                downloadOptions: downloadOptions,
                 progressHandler: { fraction, _, _, _ in progressHandler?(fraction) }
             ) {
                 let manifest = try await fetchManifest(modelId: modelId)
@@ -241,12 +245,15 @@ public enum HuggingFaceDownloader {
     ///   final attempt's associated values after retries. Other failures and
     ///   offline cache misses use `.failedToDownload`. A stall or connectivity
     ///   failure can use a complete cache instead of throwing.
+    /// - Parameter downloadOptions: Retry delays and per-attempt observation.
+    ///   An explicit `retryDelaysSeconds` overrides the delays in these options.
     public static func downloadFiles(
         modelId: String,
         to directory: URL,
         files: [String],
         offlineMode: Bool = false,
         retryDelaysSeconds: [Int]? = nil,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws {
         if files.isEmpty {
@@ -270,6 +277,7 @@ public enum HuggingFaceDownloader {
                 modelId: modelId,
                 directory: directory,
                 retryDelaysSeconds: retryDelaysSeconds,
+                downloadOptions: downloadOptions,
                 progressHandler: { fraction, _, _, _ in progressHandler?(fraction) }
             ) {
                 try await fetchManifest(modelId: modelId).matching(globs: files)
@@ -332,6 +340,8 @@ public enum HuggingFaceDownloader {
     ///   final attempt's associated values after retries. Other failures and
     ///   offline cache misses use `.failedToDownload`. A stall or connectivity
     ///   failure can use a complete cache instead of throwing.
+    /// - Parameter downloadOptions: Retry delays and per-attempt observation.
+    ///   An explicit `retryDelaysSeconds` overrides the delays in these options.
     public static func downloadFilesByteWeighted(
         modelId: String,
         to directory: URL,
@@ -339,6 +349,7 @@ public enum HuggingFaceDownloader {
         expectedSizes: [String: Int64]? = nil,
         offlineMode: Bool = false,
         retryDelaysSeconds: [Int]? = nil,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, Int64, Int64, String) -> Void)? = nil
     ) async throws {
         if files.isEmpty {
@@ -366,6 +377,7 @@ public enum HuggingFaceDownloader {
                 modelId: modelId,
                 directory: directory,
                 retryDelaysSeconds: retryDelaysSeconds,
+                downloadOptions: downloadOptions,
                 progressHandler: progressHandler
             ) {
                 let manifest = try await fetchManifest(modelId: modelId)
@@ -390,65 +402,99 @@ public enum HuggingFaceDownloader {
         }
     }
 
+    /// Retry a download operation that owns its transport and cache layout.
+    ///
+    /// Each failed attempt is logged and reported before its delay. The final
+    /// attempt's original error is thrown. An explicit `retryDelaysSeconds`
+    /// overrides the delays in `downloadOptions`; otherwise the default ladder
+    /// applies. Cancellation ends the operation without a retry event.
+    public static func withDownloadRetries<T>(
+        modelId: String,
+        retryDelaysSeconds: [Int]? = nil,
+        downloadOptions: DownloadOptions = .init(),
+        operation: () async throws -> T
+    ) async throws -> T {
+        let delays = retryDelaysSeconds ?? downloadOptions.retryDelaysSeconds
+            ?? downloadRetryDelaysSeconds
+        let maxAttempts = delays.count + 1
+        var attempt = 1
+
+        while true {
+            try Task.checkCancellation()
+            do {
+                return try await operation()
+            } catch {
+                try Task.checkCancellation()
+                if error is CancellationError { throw error }
+                let delay = attempt < maxAttempts ? delays[attempt - 1] : nil
+                if let delay {
+                    AudioLog.download.notice(
+                        "\(modelId, privacy: .private): attempt \(attempt)/\(maxAttempts) failed: \(error.localizedDescription, privacy: .private); retrying in \(delay)s")
+                } else {
+                    AudioLog.download.notice(
+                        "\(modelId, privacy: .private): attempt \(attempt)/\(maxAttempts) failed: \(error.localizedDescription, privacy: .private); no retries remain")
+                }
+                downloadOptions.onRetry?(DownloadRetryEvent(
+                    modelId: modelId, attempt: attempt, maxAttempts: maxAttempts,
+                    error: error, retryInSeconds: delay))
+                try Task.checkCancellation()
+                guard let delay else { throw error }
+                try await Task.sleep(for: .seconds(delay))
+                attempt += 1
+            }
+        }
+    }
+
     /// Shared retry ladder + stall guard around one resolve-then-transfer pass.
     static func performDownload(
         modelId: String,
         directory: URL,
         retryDelaysSeconds: [Int]?,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, Int64, Int64, String) -> Void)?,
         resolve: @escaping @Sendable () async throws -> [RepoFile]
     ) async throws {
-        let delays = retryDelaysSeconds ?? downloadRetryDelaysSeconds
+        let delays = retryDelaysSeconds ?? downloadOptions.retryDelaysSeconds
+            ?? downloadRetryDelaysSeconds
         let maxAttempts = delays.count + 1
-        var lastError: Error?
 
-        for attempt in 1...maxAttempts {
-            do {
+        do {
+            try await withDownloadRetries(
+                modelId: modelId, retryDelaysSeconds: delays,
+                downloadOptions: downloadOptions
+            ) {
                 try await withDownloadStallGuardIfInProcess(modelId: modelId) { tick in
                     let files = try await resolve()
                     tick(0)
                     try await downloadManifestFiles(
-                        files,
-                        modelId: modelId,
-                        to: directory
+                        files, modelId: modelId, to: directory
                     ) { fraction, completed, total, name in
                         tick(fraction)
                         progressHandler?(fraction, completed, total, name)
                     }
                 }
-                return
-            } catch {
-                lastError = error
-                if attempt < maxAttempts {
-                    try await Task.sleep(for: .seconds(delays[attempt - 1]))
+            }
+        } catch {
+            try Task.checkCancellation()
+            if error is CancellationError { throw error }
+            // Keep structured failures intact after the final attempt.
+            if let downloadError = error as? DownloadError {
+                switch downloadError {
+                case .stalled, .checksumMismatch, .invalidRemoteFileName, .networkUnavailable:
+                    throw downloadError
+                case .failedToDownload:
+                    break
                 }
             }
-        }
-
-        // Preserve structured failures so callers can inspect their associated
-        // values without parsing localized messages. Generic download failures
-        // still receive the retry context below.
-        if let error = lastError as? DownloadError {
-            switch error {
-            case .stalled, .checksumMismatch, .invalidRemoteFileName, .networkUnavailable:
-                throw error
-            case .failedToDownload:
-                break
+            // Only connectivity failures may be answered from a complete cache.
+            if isLikelyNetworkFailure(error) {
+                throw DownloadError.networkUnavailable(
+                    modelId: modelId, detail: error.localizedDescription)
             }
+            throw DownloadError.failedToDownload(
+                "\(modelId) after \(maxAttempts) attempt\(maxAttempts == 1 ? "" : "s") "
+                    + "(target: \(directory.path)): " + error.localizedDescription)
         }
-
-        // Distinguish "we couldn't reach the Hub" from "the Hub said no". Only
-        // the former is safe to answer from cache: a 404 means the caller asked
-        // for something that isn't there, and silently loading whatever happens
-        // to be on disk would attribute the resulting failure to the wrong thing.
-        if let lastError, isLikelyNetworkFailure(lastError) {
-            throw DownloadError.networkUnavailable(
-                modelId: modelId, detail: lastError.localizedDescription)
-        }
-        throw DownloadError.failedToDownload(
-            "\(modelId) after \(maxAttempts) attempt\(maxAttempts == 1 ? "" : "s") "
-                + "(target: \(directory.path)): "
-                + (lastError?.localizedDescription ?? "unknown"))
     }
 
     /// Whether `error` looks like the network being unreachable rather than the

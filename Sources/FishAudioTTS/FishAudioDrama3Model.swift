@@ -26,12 +26,13 @@ public final class FishAudioDrama3Model: SpeechGenerationModel, @unchecked Senda
     public static func fromPretrained(modelId: String = defaultModelId, cacheDir: URL? = nil,
                                       offlineMode: Bool = false,
                                       memoryOptions: FishAudioMemoryOptions = .balanced,
+                                      downloadOptions: DownloadOptions = .init(),
                                       progressHandler: ((Double, String) -> Void)? = nil) async throws -> FishAudioDrama3Model {
         try memoryOptions.validate()
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
         try await HuggingFaceDownloader.downloadFiles(modelId: modelId, to: directory,
             files: ["config.json", "tokenizer.json", "tokenizer_config.json", "model*.safetensors",
-                    "codec.safetensors", "LICENSE", "NOTICE"], offlineMode: offlineMode) {
+                    "codec.safetensors", "LICENSE", "NOTICE"], offlineMode: offlineMode, downloadOptions: downloadOptions) {
             progressHandler?($0 * 0.85, "Downloading Fish Audio Drama 3")
         }
         return try await fromBundle(directory, memoryOptions: memoryOptions) { progress, message in

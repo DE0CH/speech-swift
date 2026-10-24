@@ -50,6 +50,7 @@ public final class Qwen3DenseChat: @unchecked Sendable {
         modelId: String = "aufklarer/Qwen3-4B-Instruct-2507-MLX-5bit",
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> Qwen3DenseChat {
         let dir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -61,6 +62,7 @@ public final class Qwen3DenseChat: @unchecked Sendable {
                 "model.safetensors", "model.safetensors.index.json",
             ],
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { progressHandler?($0 * 0.5, "Downloading…") }
         )
         return try fromDirectory(dir, progressHandler: { progressHandler?(0.5 + $0 * 0.5, $1) })

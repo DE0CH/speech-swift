@@ -62,6 +62,7 @@ public final class VibeVoice15BTTSModel {
         configuration: Configuration = Configuration(),
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> VibeVoice15BTTSModel {
         let modelCacheDir = try cacheDir
@@ -72,7 +73,8 @@ public final class VibeVoice15BTTSModel {
                 modelId: configuration.modelId,
                 to: modelCacheDir,
                 additionalFiles: ["config.json", "preprocessor_config.json", "quantization.json"],
-                offlineMode: offlineMode
+                offlineMode: offlineMode,
+                downloadOptions: downloadOptions
             ) { fraction in
                 progressHandler?(fraction * 0.7, "Downloading model...")
             }
@@ -91,7 +93,8 @@ public final class VibeVoice15BTTSModel {
                     "vocab.json", "merges.txt",
                     "special_tokens_map.json", "added_tokens.json",
                 ],
-                offlineMode: offlineMode
+                offlineMode: offlineMode,
+                downloadOptions: downloadOptions
             )
         }
 

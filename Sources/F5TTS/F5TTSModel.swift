@@ -39,6 +39,7 @@ public final class F5TTSModel: SpeechGenerationModel, ModelMemoryManageable, @un
         modelId: String = defaultModelId,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> F5TTSModel {
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -46,7 +47,8 @@ public final class F5TTSModel: SpeechGenerationModel, ModelMemoryManageable, @un
             modelId: modelId,
             to: directory,
             files: requiredFiles,
-            offlineMode: offlineMode
+            offlineMode: offlineMode,
+            downloadOptions: downloadOptions
         ) { progress in
             progressHandler?(progress * 0.85, "Downloading F5-TTS")
         }
@@ -57,6 +59,7 @@ public final class F5TTSModel: SpeechGenerationModel, ModelMemoryManageable, @un
             to: directory,
             files: [pinyinLexiconFile],
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: nil)
         return try await fromBundle(directory) { progress, message in
             progressHandler?(0.85 + progress * 0.15, message)

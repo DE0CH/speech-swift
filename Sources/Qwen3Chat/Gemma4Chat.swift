@@ -73,6 +73,7 @@ public final class Gemma4Chat: @unchecked Sendable {
         modelId: String = "aufklarer/gemma-4-E4B-it-MLX-4bit",
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> Gemma4Chat {
         let cacheDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -84,6 +85,7 @@ public final class Gemma4Chat: @unchecked Sendable {
                 "generation_config.json", "model.safetensors", "model.safetensors.index.json",
             ],
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { progressHandler?($0 * 0.6, "Downloading...") })
         return try fromDirectory(cacheDir) { p, m in progressHandler?(0.6 + p * 0.4, m) }
     }

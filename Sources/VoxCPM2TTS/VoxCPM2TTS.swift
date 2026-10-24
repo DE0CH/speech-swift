@@ -158,6 +158,7 @@ public final class VoxCPM2TTSModel: Module {
         tokenizerDirectory: URL? = nil,
         offlineMode: Bool = false,
         weightPrecision: VoxCPM2WeightPrecision = .automatic,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> VoxCPM2TTSModel {
         let modelCacheDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -187,7 +188,8 @@ public final class VoxCPM2TTSModel: Module {
                     "special_tokens_map.json",
                     "generation_config.json"
                 ],
-                offlineMode: offlineMode
+                offlineMode: offlineMode,
+                downloadOptions: downloadOptions
                 ) { fraction in
                 progressHandler?(fraction * 0.8, "Downloading model...")
             }
@@ -200,7 +202,8 @@ public final class VoxCPM2TTSModel: Module {
                     modelId: Self.officialTokenizerModelId,
                     to: tokenizerCacheDir,
                     files: Self.officialTokenizerFiles,
-                    offlineMode: offlineMode
+                    offlineMode: offlineMode,
+                    downloadOptions: downloadOptions
                 ) { fraction in
                     progressHandler?(fraction * 0.8, "Refreshing tokenizer snapshot...")
                 }

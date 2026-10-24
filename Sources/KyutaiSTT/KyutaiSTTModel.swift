@@ -49,6 +49,7 @@ public final class KyutaiSTTModel: SpeechRecognitionModel {
         _ modelPath: String = defaultModelId,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> KyutaiSTTModel {
         var isDirectory: ObjCBool = false
@@ -59,13 +60,14 @@ public final class KyutaiSTTModel: SpeechRecognitionModel {
         // Read the configuration first: original and exported bundles name Mimi differently.
         try await HuggingFaceDownloader.downloadFiles(
             modelId: modelPath, to: directory, files: ["config.json"],
-            offlineMode: offlineMode)
+            offlineMode: offlineMode,
+            downloadOptions: downloadOptions)
         let config = try JSONDecoder().decode(
             KyutaiSTTConfig.self, from: Data(contentsOf: directory.appendingPathComponent("config.json")))
         try await HuggingFaceDownloader.downloadWeights(
             modelId: modelPath, to: directory,
             additionalFiles: ["model.safetensors", config.mimiName, config.tokenizerName],
-            offlineMode: offlineMode, progressHandler: progressHandler)
+            offlineMode: offlineMode, downloadOptions: downloadOptions, progressHandler: progressHandler)
         return try fromDirectory(directory)
     }
 

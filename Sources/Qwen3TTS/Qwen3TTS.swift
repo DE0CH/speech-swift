@@ -1831,6 +1831,7 @@ public extension Qwen3TTSModel {
         tokenizerCacheDir: URL? = nil,
         offlineMode: Bool = false,
         wiredMemoryPolicy: Qwen3TTSWiredMemoryPolicy = .pin(fraction: 0.9),
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> Qwen3TTSModel {
         progressHandler?(0.05, "Preparing download...")
@@ -1854,6 +1855,7 @@ public extension Qwen3TTSModel {
                 to: mainCacheDir,
                 additionalFiles: ["merges.txt", "tokenizer_config.json", "vocab.json"],
                 offlineMode: offlineMode,
+                downloadOptions: downloadOptions,
                 progressHandler: { progress in
                     progressHandler?(0.1 + progress * 0.3, "Downloading TTS model weights...")
                 })
@@ -1868,6 +1870,7 @@ public extension Qwen3TTSModel {
                 modelId: tokenizerModelId,
                 to: resolvedTokenizerCacheDir,
                 offlineMode: offlineMode,
+                downloadOptions: downloadOptions,
                 progressHandler: { progress in
                     progressHandler?(0.4 + progress * 0.2, "Downloading speech tokenizer...")
                 })

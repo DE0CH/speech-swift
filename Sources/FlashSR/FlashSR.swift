@@ -78,10 +78,11 @@ public final class FlashSR {
 
     public static func fromPretrained(
         variant: FlashSRVariant = .int4,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> FlashSR {
         let paths = try await FlashSRDownloader.ensureDownloaded(
-            variant: variant, progressHandler: progressHandler)
+            variant: variant, downloadOptions: downloadOptions, progressHandler: progressHandler)
         let cfg = try FlashSRConfig.load(from: paths.bundleDir.appendingPathComponent("config.json"))
 
         // Load the safetensors bundle, then dequantize per `quantized_shapes`.

@@ -90,6 +90,7 @@ public final class HiggsTTSModel: SpeechGenerationModel, ModelMemoryManageable, 
         modelId: String = defaultModelId,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> HiggsTTSModel {
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -97,7 +98,8 @@ public final class HiggsTTSModel: SpeechGenerationModel, ModelMemoryManageable, 
             modelId: modelId,
             to: directory,
             files: requiredFiles,
-            offlineMode: offlineMode
+            offlineMode: offlineMode,
+            downloadOptions: downloadOptions
         ) { progress in
             progressHandler?(progress * 0.9, "Downloading Higgs TTS 3")
         }

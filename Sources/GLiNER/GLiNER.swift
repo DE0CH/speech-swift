@@ -38,6 +38,7 @@ public final class GLiNER {
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
         evaluateLayers: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> GLiNER {
         let id = modelID ?? variant.modelID
@@ -45,6 +46,7 @@ public final class GLiNER {
         progressHandler?(0, "Downloading GLiNER...")
         try await HuggingFaceDownloader.downloadFiles(
             modelId: id, to: directory, files: variant.files, offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { progressHandler?($0 * 0.9, "Downloading model files...") })
         // The downloader skips requested files a repository does not have, so
         // an incomplete or wrong repository must be caught here, not at load.

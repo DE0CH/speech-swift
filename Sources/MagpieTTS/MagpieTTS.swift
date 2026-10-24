@@ -53,10 +53,11 @@ public final class MagpieTTS {
 
     public static func fromPretrained(
         variant: MagpieTTSVariant = .int8,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> MagpieTTS {
         let paths = try await MagpieTTSDownloader.ensureDownloaded(
-            variant: variant, progressHandler: progressHandler)
+            variant: variant, downloadOptions: downloadOptions, progressHandler: progressHandler)
         return try MagpieTTS.load(from: paths)
     }
 

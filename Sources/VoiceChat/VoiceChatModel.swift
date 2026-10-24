@@ -106,12 +106,19 @@ public final class VoiceChatModel {
     public static func loadFromHub(
         _ modelID: String = defaultModelID,
         revision: String = "main",
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: @escaping (Progress) -> Void = { _ in },
         loadProgressHandler: VoiceChatLoadProgressHandler? = nil
     ) async throws -> VoiceChatModel {
         let hub = HubApi(endpoint: HuggingFaceDownloader.resolvedEndpoint())
-        let directory = try await hub.snapshot(
-            from: modelID, revision: revision, progressHandler: progressHandler)
+        let directory = try await HuggingFaceDownloader.withDownloadRetries(
+            modelId: modelID,
+            retryDelaysSeconds: downloadOptions.retryDelaysSeconds ?? [],
+            downloadOptions: downloadOptions
+        ) {
+            try await hub.snapshot(
+                from: modelID, revision: revision, progressHandler: progressHandler)
+        }
         return try await load(
             from: directory,
             progressHandler: loadProgressHandler)
