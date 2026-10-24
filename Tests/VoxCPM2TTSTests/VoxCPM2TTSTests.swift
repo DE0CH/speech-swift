@@ -453,8 +453,11 @@ final class E2EVoxCPM2TTSTests: XCTestCase {
     }
 
     private func runBasicSynthesis(modelId: String, file: StaticString = #filePath, line: UInt = #line) async throws {
+        let callerLimit = Memory.cacheLimit
         let model = try await VoxCPM2TTSModel.fromPretrained(modelId: modelId)
         defer { model.unload() }
+        let ceiling = VoxCPM2Memory.cacheLimit(physicalMemoryBytes: Int(ProcessInfo.processInfo.physicalMemory))
+        XCTAssertEqual(Memory.cacheLimit, min(callerLimit, ceiling), "loaded model caps the buffer cache", file: file, line: line)
         // Cap maxTokens to bound test runtime — the stop head doesn't always
         // fire quickly for short prompts on every variant. Keep
         // inferenceTimesteps + minTokens at defaults (10 / 2) so the Euler
@@ -469,6 +472,9 @@ final class E2EVoxCPM2TTSTests: XCTestCase {
         let maxAmp = audio.map { abs($0) }.max() ?? 0
         XCTAssertTrue(maxAmp.isFinite, "Audio must not contain NaN/Inf", file: file, line: line)
         XCTAssertGreaterThan(maxAmp, 0.001, "Should not be silent", file: file, line: line)
+
+        model.unload()
+        XCTAssertEqual(Memory.cacheLimit, callerLimit, "unload restores the caller's limit", file: file, line: line)
     }
 
     func testBasicSynthesisBF16() async throws {
