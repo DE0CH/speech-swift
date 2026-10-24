@@ -8,6 +8,7 @@ import VoxCPM2TTS
 import IndexTTS2TTS
 import F5TTS
 import HiggsTTS
+import BreezeTTS
 import VoxtralTTS
 import FishAudioTTS
 import PocketTTS
@@ -20,13 +21,13 @@ import SpeechRestoration
 public struct SpeakCommand: ParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "speak",
-        abstract: "Text-to-speech synthesis (Qwen3-TTS, CosyVoice, VoxCPM2, Pocket TTS, Voxtral, Fish Drama 3, IndexTTS2, F5-TTS, Higgs, Indic-Mio, Magpie, or MOSS-TTS-Nano). For Qwen3-TTS CoreML, use the `qwen3-tts-coreml` subcommand."
+        abstract: "Text-to-speech synthesis (Qwen3-TTS, CosyVoice, VoxCPM2, Pocket TTS, Voxtral, Fish Drama 3, IndexTTS2, F5-TTS, Higgs, Breeze TTS 2, Indic-Mio, Magpie, or MOSS-TTS-Nano). For Qwen3-TTS CoreML, use the `qwen3-tts-coreml` subcommand."
     )
 
     @Argument(help: "Text to synthesize (omit when using --list-speakers or --batch-file)")
     public var text: String?
 
-    @Option(name: .long, help: "TTS engine: qwen3 (default), cosyvoice, voxcpm2, pocket, voxtral, fish-drama3, indextts2, f5, higgs, indic-mio, magpie, magpie-coreml, or moss-nano")
+    @Option(name: .long, help: "TTS engine: qwen3 (default), cosyvoice, voxcpm2, pocket, voxtral, fish-drama3, indextts2, f5, higgs, breeze, indic-mio, magpie, magpie-coreml, or moss-nano")
     public var engine: String = "qwen3"
 
     @Option(name: .shortAndLong, help: "Output WAV file path")
@@ -58,10 +59,10 @@ public struct SpeakCommand: ParsableCommand {
     @Option(name: .long, help: "[qwen3] Speaker voice (requires --model customVoice)")
     public var speaker: String?
 
-    @Option(name: .long, help: "[qwen3] Style instruction (requires CustomVoice model)")
+    @Option(name: .long, help: "[qwen3/breeze] Style or voice-design instruction (Qwen3 requires CustomVoice)")
     public var instruct: String?
 
-    @Option(name: .long, help: "Reference audio file for voice cloning (qwen3 Base, cosyvoice, voxcpm2, fish-drama3, indextts2, f5, higgs, indic-mio, or moss-nano)")
+    @Option(name: .long, help: "Reference audio file for voice cloning (qwen3 Base, cosyvoice, voxcpm2, fish-drama3, indextts2, f5, higgs, breeze, indic-mio, or moss-nano)")
     public var voiceSample: String?
 
     @Option(name: .long, help: "[moss-nano] HuggingFace model ID or local compiled model directory")
@@ -76,7 +77,7 @@ public struct SpeakCommand: ParsableCommand {
     @Option(name: .long, help: "[moss-nano] Reproducible Swift sampling seed")
     public var mossNanoSeed: UInt64 = 0
 
-    @Flag(name: .long, help: "Restore (denoise + dereverb) the voice-cloning reference with Sidon before cloning. Opt-in; preserves speaker identity. Applies to qwen3/cosyvoice/voxcpm2/fish-drama3/f5/higgs/indic-mio/moss-nano references.")
+    @Flag(name: .long, help: "Restore (denoise + dereverb) the voice-cloning reference with Sidon before cloning. Opt-in; preserves speaker identity. Applies to qwen3/cosyvoice/voxcpm2/fish-drama3/f5/higgs/breeze/indic-mio/moss-nano references.")
     public var cleanReference: Bool = false
 
     @Option(name: .long, help: "Sidon variant for --clean-reference: fp16 (default) or int8")
@@ -280,6 +281,35 @@ public struct SpeakCommand: ParsableCommand {
     @Option(name: .long, help: "[f5] Reference RMS normalization target (default 0.1)")
     public var f5TargetRMS: Float = 0.1
 
+    // MARK: - Breeze-specific options
+
+    @Option(name: .long, help: "[breeze] Hugging Face MLX bundle ID")
+    public var breezeModelId: String = BreezeTTSModel.defaultModelId
+
+    @Option(name: .long, help: "[breeze] Load a local MLX bundle directory")
+    public var breezeBundleDir: String?
+
+    @Option(name: .long, help: "[breeze] Exact transcript of --voice-sample; required for cloning")
+    public var breezeReferenceText: String?
+
+    @Option(name: .long, help: "[breeze] Sampling temperature; 0 selects greedy decoding")
+    public var breezeTemperature: Float = 0.9
+
+    @Option(name: .long, help: "[breeze] Top-k sampling; 0 disables")
+    public var breezeTopK: Int = 50
+
+    @Option(name: .long, help: "[breeze] Nucleus sampling threshold")
+    public var breezeTopP: Float = 1
+
+    @Option(name: .long, help: "[breeze] Instruction guidance scale; 1 disables CFG")
+    public var breezeCfgScale: Float = 4
+
+    @Option(name: .long, help: "[breeze] Maximum 80 ms codec frames; reaching the cap throws")
+    public var breezeMaxFrames: Int = 750
+
+    @Option(name: .long, help: "[breeze] Reproducible sampling seed")
+    public var breezeSeed: UInt64 = 42
+
     // MARK: - Higgs-specific options
 
     @Option(name: .long, help: "[higgs] HuggingFace model ID for the MLX bundle")
@@ -362,8 +392,8 @@ public struct SpeakCommand: ParsableCommand {
         let eng = engine.lowercased()
         guard eng == "qwen3" || eng == "cosyvoice" || eng == "voxcpm2"
                 || eng == "voxtral" || eng == "pocket" || eng == "fish-drama3"
-                || eng == "indextts2" || eng == "f5" || eng == "higgs" || eng == "indic-mio" || eng == "magpie" || eng == "magpie-coreml" || eng == "moss-nano" else {
-            throw ValidationError("--engine must be 'qwen3', 'cosyvoice', 'voxcpm2', 'pocket', 'voxtral', 'fish-drama3', 'indextts2', 'f5', 'higgs', 'indic-mio', 'magpie', 'magpie-coreml', or 'moss-nano'. For Qwen3-TTS CoreML, use the `qwen3-tts-coreml` subcommand.")
+                || eng == "indextts2" || eng == "f5" || eng == "higgs" || eng == "breeze" || eng == "indic-mio" || eng == "magpie" || eng == "magpie-coreml" || eng == "moss-nano" else {
+            throw ValidationError("--engine must be 'qwen3', 'cosyvoice', 'voxcpm2', 'pocket', 'voxtral', 'fish-drama3', 'indextts2', 'f5', 'higgs', 'breeze', 'indic-mio', 'magpie', 'magpie-coreml', or 'moss-nano'. For Qwen3-TTS CoreML, use the `qwen3-tts-coreml` subcommand.")
         }
         if text == nil && batchFile == nil && !listSpeakers {
             throw ValidationError("Either a text argument, --batch-file, or --list-speakers must be provided")
@@ -471,6 +501,23 @@ public struct SpeakCommand: ParsableCommand {
             if instruct != nil {
                 throw ValidationError("--engine f5 does not support --instruct")
             }
+        }
+        if eng == "breeze" {
+            guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  batchFile == nil, !listSpeakers, speaker == nil else {
+                throw ValidationError("--engine breeze requires one nonempty text; use --instruct for voice design")
+            }
+            if let language, !["en", "english", "zh", "chinese", "zh-cn", "mandarin"].contains(language.lowercased()) {
+                throw ValidationError("Breeze supports English and Chinese; language is inferred from text")
+            }
+            guard (voiceSample == nil) == (breezeReferenceText == nil) else {
+                throw ValidationError("--voice-sample and --breeze-reference-text must be provided together")
+            }
+            if let reference = breezeReferenceText, reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw ValidationError("--breeze-reference-text must be nonempty")
+            }
+            if cleanReference && voiceSample == nil { throw ValidationError("--clean-reference requires --voice-sample") }
+            try breezeOptions().validate()
         }
         if eng == "higgs" {
             if batchFile != nil || listSpeakers {
@@ -593,6 +640,8 @@ public struct SpeakCommand: ParsableCommand {
             try runIndexTTS2()
         case "f5":
             try runF5TTS()
+        case "breeze":
+            try runBreeze()
         case "higgs":
             try runHiggs()
         case "indic-mio":
@@ -1535,6 +1584,65 @@ public struct SpeakCommand: ParsableCommand {
             let elapsed = CFAbsoluteTimeGetCurrent() - start
             let duration = Double(samples.count) / Double(model.sampleRate)
             print(String(format: "  Duration: %.2fs, Time: %.2fs, RTF: %.3f", duration, elapsed, elapsed / duration))
+            if let player {
+                player.markGenerationComplete()
+                while player.isPlaying { try await Task.sleep(for: .milliseconds(20)) }
+            } else if play {
+                playAudio(samples: samples, sampleRate: model.sampleRate)
+            } else {
+                try WAVWriter.write(samples: samples, sampleRate: model.sampleRate, to: URL(fileURLWithPath: output))
+                print("Saved \(samples.count) samples to \(output)")
+            }
+        }
+    }
+
+    // MARK: - Breeze engine
+
+    private func breezeOptions() -> BreezeTTSOptions {
+        BreezeTTSOptions(temperature: breezeTemperature, topK: breezeTopK, topP: breezeTopP,
+            cfgScale: breezeCfgScale, maxFrames: breezeMaxFrames, seed: breezeSeed,
+            firstChunkFrames: firstChunkFrames, chunkFrames: chunkFrames)
+    }
+
+    private func runBreeze() throws {
+        try runAsync {
+            guard let text else { throw ValidationError("Breeze requires text") }
+            let loadStart = CFAbsoluteTimeGetCurrent()
+            let model: BreezeTTSModel
+            if let directory = breezeBundleDir {
+                model = try await BreezeTTSModel.fromBundle(URL(fileURLWithPath: directory), progressHandler: reportProgress)
+            } else {
+                model = try await BreezeTTSModel.fromPretrained(modelId: breezeModelId, progressHandler: reportProgress)
+            }
+            print(String(format: "  Model load: %.2fs", CFAbsoluteTimeGetCurrent() - loadStart))
+            let reference = try voiceSample.map { try loadReference(path: $0, targetSampleRate: model.sampleRate) }
+            let player = stream && play ? StreamingAudioPlayer() : nil
+            defer { player?.stop() }
+            if let player {
+                player.preBufferDuration = max(0.16, Double(chunkFrames) / 12.5)
+                player.skipInitialSilence = false
+                try player.start(sampleRate: Double(model.sampleRate))
+            }
+            let start = CFAbsoluteTimeGetCurrent()
+            var samples: [Float] = []
+            var firstAudio: Double?
+            if stream {
+                try await model.generateStreaming(text: text, instruction: instruct, referenceAudio: reference,
+                    referenceText: breezeReferenceText, language: language, options: breezeOptions()) { chunk in
+                    if !chunk.samples.isEmpty {
+                        if firstAudio == nil { firstAudio = CFAbsoluteTimeGetCurrent() - start }
+                        samples += chunk.samples
+                        player?.scheduleChunk(chunk.samples)
+                    }
+                }
+            } else {
+                samples = try await model.generate(text: text, instruction: instruct, referenceAudio: reference,
+                    referenceText: breezeReferenceText, language: language, options: breezeOptions())
+            }
+            let elapsed = CFAbsoluteTimeGetCurrent() - start
+            let duration = Double(samples.count) / Double(model.sampleRate)
+            if let firstAudio { print(String(format: "  First audio: %.0f ms", firstAudio * 1000)) }
+            print(String(format: "  Duration: %.2fs, Time: %.2fs, RTF: %.3f", duration, elapsed, elapsed / max(duration, 0.001)))
             if let player {
                 player.markGenerationComplete()
                 while player.isPlaying { try await Task.sleep(for: .milliseconds(20)) }
