@@ -5,6 +5,11 @@ import MLXCommon
 import MLXLLM
 import MLXLMCommon
 
+enum Gemma4PrefillStrategy: Equatable {
+    case cacheOnly
+    case fullLogits
+}
+
 /// Opt-in completion details captured before native tool parsing.
 public struct Gemma4GenerationTrace: Codable, Sendable {
     public let prompt: String
@@ -86,6 +91,19 @@ public final class Gemma4UnifiedChat: @unchecked Sendable {
         cancellation: InferenceCancellationToken? = nil,
         onGeneration: (@Sendable (Gemma4GenerationTrace) -> Void)?
     ) throws -> Gemma4Response {
+        try generateResponse(messages: messages, tools: tools, sampling: sampling,
+                             cancellation: cancellation, onGeneration: onGeneration,
+                             prefillStrategy: .cacheOnly)
+    }
+
+    /// Internal reference path retains the former prefill for numerical regression checks.
+    func generateResponse(
+        messages: [Gemma4ConversationMessage], tools: [Gemma4Tool],
+        sampling: ChatSamplingConfig,
+        cancellation: InferenceCancellationToken?,
+        onGeneration: (@Sendable (Gemma4GenerationTrace) -> Void)?,
+        prefillStrategy: Gemma4PrefillStrategy
+    ) throws -> Gemma4Response {
         try cancellation?.checkCancellation()
         try Task.checkCancellation()
         guard sampling.responseFormat == nil else {
@@ -102,16 +120,19 @@ public final class Gemma4UnifiedChat: @unchecked Sendable {
         var cache = model.newCache(parameters: nil)
         defer { cache.removeAll() }
         var logits: MLXArray?
-        for offset in stride(from: 0, to: tokens.count, by: 256) {
+        for range in Self.prefillRanges(tokenCount: tokens.count, strategy: prefillStrategy) {
             try cancellation?.checkCancellation()
             try Task.checkCancellation()
-            let end = min(offset + 256, tokens.count)
-            let input = MLXArray(tokens[offset..<end].map { Int32($0) }).expandedDimensions(axis: 0)
+            let input = MLXArray(tokens[range].map { Int32($0) }).expandedDimensions(axis: 0)
             let output = model(input, cache: cache)
-            let last = output[0, output.dim(1) - 1, 0...]
-            eval(last)
+            // Prefix positions only populate KV state. Evaluating their logits
+            // also projects discarded positions through the 262k vocabulary.
+            if prefillStrategy == .fullLogits || range.upperBound == tokens.count {
+                let last = output[0, output.dim(1) - 1, 0...]
+                eval(last)
+                logits = last
+            }
             eval(cache.flatMap { $0.state })
-            logits = last
         }
         guard var nextLogits = logits else { throw ChatModelError.inferenceFailed("Empty prefill") }
         var history = tokens
@@ -145,5 +166,16 @@ public final class Gemma4UnifiedChat: @unchecked Sendable {
                                             stopTokenID: stopTokenID,
                                             finishReason: stopTokenID == nil ? "length" : "stop"))
         return try Gemma4ToolCodec.response(raw, generatedTokens: generated.count, allowRepeatedToolTerminators: true)
+    }
+
+    static func prefillRanges(tokenCount: Int, chunkSize: Int = 256,
+                              strategy: Gemma4PrefillStrategy = .cacheOnly) -> [Range<Int>] {
+        guard tokenCount > 0, chunkSize > 0 else { return [] }
+        let prefixCount = strategy == .cacheOnly ? tokenCount - 1 : tokenCount
+        var ranges = stride(from: 0, to: prefixCount, by: chunkSize).map {
+            $0..<min($0 + chunkSize, prefixCount)
+        }
+        if strategy == .cacheOnly { ranges.append((tokenCount - 1)..<tokenCount) }
+        return ranges
     }
 }

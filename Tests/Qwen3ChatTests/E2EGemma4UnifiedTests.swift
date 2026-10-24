@@ -1,9 +1,61 @@
 import AudioCommon
 import Foundation
+import MLX
 import XCTest
 @testable import Qwen3Chat
 
 final class E2EGemma4UnifiedTests: XCTestCase {
+    func testLongPromptCacheOnlyPrefillMatchesReferenceGreedyTokens() throws {
+        guard let folder = ProcessInfo.processInfo.environment["GEMMA4_12B_MODEL_DIR"] else {
+            throw XCTSkip("Set GEMMA4_12B_MODEL_DIR to the staged Gemma 4 12B INT4 checkpoint")
+        }
+        final class Capture: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value: Gemma4GenerationTrace?
+            func store(_ trace: Gemma4GenerationTrace) { lock.withLock { value = trace } }
+            var trace: Gemma4GenerationTrace? { lock.withLock { value } }
+        }
+        Memory.cacheLimit = 128 * 1024 * 1024
+        Memory.memoryLimit = 20 * 1024 * 1024 * 1024
+        let chat = try Gemma4UnifiedChat.fromDirectory(URL(fileURLWithPath: folder))
+        let tools = [Gemma4Tool(name: "record_note", description: "Record the exact text of a note.",
+                               parameters: .object(["type": .string("object"),
+                                                    "properties": .object(["text": .object(["type": .string("string")])]),
+                                                    "required": .array([.string("text")])]))]
+        let reference = String(repeating: "Reference notes describe routine scheduling, inventory, and account policies. ", count: 700)
+        let messages: [Gemma4ConversationMessage] = [
+            .init(role: .system, content: reference + "\nUse record_note to save the user's exact note. Do not include the reference notes in the saved text."),
+            .init(role: .user, content: "Save a note with the exact text: launch review")]
+        let sampling = ChatSamplingConfig(temperature: 0, maxTokens: 128, repetitionPenalty: 1)
+        var traces: [Gemma4GenerationTrace] = []
+        var responses: [Gemma4Response] = []
+        // Reversing the order on the second pair separates initialization cost
+        // from repeated prompt evaluation. Every request starts a fresh cache.
+        for strategy in [Gemma4PrefillStrategy.fullLogits, .cacheOnly, .cacheOnly, .fullLogits] {
+            Memory.clearCache()
+            let capture = Capture()
+            let started = Date()
+            let response = try chat.generateResponse(messages: messages, tools: tools, sampling: sampling,
+                                                       cancellation: nil, onGeneration: { capture.store($0) },
+                                                       prefillStrategy: strategy)
+            let trace = try XCTUnwrap(capture.trace)
+            XCTAssertGreaterThan(trace.promptTokenIDs.count, 4096)
+            print("Gemma4 prefill \(strategy): \(trace.promptTokenIDs.count) prompt tokens, \(trace.generatedTokenIDs.count) generated tokens, \(Date().timeIntervalSince(started)) seconds")
+            XCTAssertEqual(response.toolCalls.count, 1)
+            let call = try XCTUnwrap(response.toolCalls.first)
+            XCTAssertEqual(call.name, "record_note")
+            XCTAssertEqual(call.arguments, .object(["text": .string("launch review")]))
+            traces.append(trace)
+            responses.append(response)
+        }
+        for index in traces.indices.dropFirst() {
+            XCTAssertEqual(traces[index].promptTokenIDs, traces[0].promptTokenIDs)
+            XCTAssertEqual(traces[index].generatedTokenIDs, traces[0].generatedTokenIDs)
+            XCTAssertEqual(traces[index].rawOutput, traces[0].rawOutput)
+            XCTAssertEqual(responses[index].content, responses[0].content)
+        }
+    }
+
     func testCompletionTraceSurvivesMalformedToolOutput() throws {
         guard let folder = ProcessInfo.processInfo.environment["GEMMA4_12B_MODEL_DIR"] else {
             throw XCTSkip("Set GEMMA4_12B_MODEL_DIR to the staged Gemma 4 12B INT4 checkpoint")

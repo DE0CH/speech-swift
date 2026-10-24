@@ -3,6 +3,26 @@ import XCTest
 @testable import Qwen3Chat
 
 final class Gemma4UnifiedConfigTests: XCTestCase {
+    func testPrefillVisitsEveryTokenOnceAndOnlyProjectsTheFinalPosition() {
+        for count in [1, 2, 255, 256, 257, 512, 513, 8192, 8193] {
+            let ranges = Gemma4UnifiedChat.prefillRanges(tokenCount: count)
+            XCTAssertEqual(ranges.flatMap { Array($0) }, Array(0..<count))
+            XCTAssertEqual(ranges.last, (count - 1)..<count)
+            XCTAssertTrue(ranges.dropLast().allSatisfy { $0.count <= 256 })
+        }
+        XCTAssertTrue(Gemma4UnifiedChat.prefillRanges(tokenCount: 0).isEmpty)
+        XCTAssertTrue(Gemma4UnifiedChat.prefillRanges(tokenCount: 1, chunkSize: 0).isEmpty)
+    }
+
+    func testReferencePrefillRetainsFormerChunkBoundaries() {
+        XCTAssertEqual(Gemma4UnifiedChat.prefillRanges(tokenCount: 513, strategy: .fullLogits),
+                       [0..<256, 256..<512, 512..<513])
+        XCTAssertEqual(Gemma4UnifiedChat.prefillRanges(tokenCount: 513),
+                       [0..<256, 256..<512, 512..<513])
+        XCTAssertEqual(Gemma4UnifiedChat.prefillRanges(tokenCount: 512),
+                       [0..<256, 256..<511, 511..<512])
+    }
+
     func testJSONToolResponseMatchesCheckpointTextEncodingWithoutChangingLegacyPrompt() throws {
         let call = Gemma4ToolCall(id: "read-1", name: "read_record", arguments: .object(["id": .string("rec_2")]))
         let messages: [Gemma4ConversationMessage] = [

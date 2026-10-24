@@ -35,7 +35,11 @@ argument strings retain their original values. For 12B, repeated adjacent
 terminators immediately after a fully validated call are consumed with that
 call. Standalone terminators, incomplete calls, and invalid arguments remain
 errors. The public codec and E4B keep strict terminator handling. Cancellation is cooperative. Prefill evaluates
-256-token batches and each request owns its KV cache. This interface provides
+KV state in batches of at most 256 tokens, then computes initial vocabulary
+logits for the final prompt token only. Intermediate prompt positions do not
+materialize discarded vocabulary projections. Each request owns its KV cache,
+which is released after generation or cancellation; prompt state is not shared
+between requests. This interface provides
 buffered text/tool responses; it rejects constrained response formats. Vision
 and audio input use other modules and are outside this text interface.
 
