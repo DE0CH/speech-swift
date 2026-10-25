@@ -106,6 +106,11 @@ public final class Mimi: Module {
 
 public extension Mimi {
     func sanitize(weights: [String: MLXArray]) -> [String: MLXArray] {
+        Self.sanitizeWeights(weights)
+    }
+
+    /// Maps original checkpoint tensors without constructing both codec directions.
+    static func sanitizeWeights(_ weights: [String: MLXArray]) -> [String: MLXArray] {
         var out: [String: MLXArray] = [:]
 
         for (rawKey, rawVal) in weights {
@@ -218,6 +223,7 @@ public extension Mimi {
         numCodebooks: Int = 16,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> Mimi {
         let cfg = MimiConfig.moshiko(numCodebooks: numCodebooks)
@@ -232,7 +238,8 @@ public extension Mimi {
                 modelId: repoId,
                 to: mimiDir,
                 additionalFiles: [filename],
-                offlineMode: offlineMode
+                offlineMode: offlineMode,
+                downloadOptions: downloadOptions
             )
         }
 

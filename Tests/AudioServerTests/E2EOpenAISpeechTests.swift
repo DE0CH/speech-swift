@@ -6,22 +6,16 @@ import XCTest
 /// Requires Kokoro weights and CoreML inference. The `E2E` class prefix keeps
 /// it out of the CI-safe unit phase; run it with the isolated E2E test runner.
 final class E2EOpenAISpeechTests: XCTestCase {
-    static var serverTask: Task<Void, Error>?
     static let port = 19386
 
-    override class func setUp() {
-        super.setUp()
-        serverTask = Task {
-            let server = AudioServer(host: "127.0.0.1", port: port)
+    override func setUp() async throws {
+        try await super.setUp()
+        let fixture = TestAudioServer(port: Self.port) {
+            let server = AudioServer(host: "127.0.0.1", port: Self.port)
             try await server.run()
         }
-        Thread.sleep(forTimeInterval: 1.5)
-    }
-
-    override class func tearDown() {
-        serverTask?.cancel()
-        Thread.sleep(forTimeInterval: 0.5)
-        super.tearDown()
+        addTeardownBlock { await fixture.stop() }
+        try await fixture.start()
     }
 
     func testSynthesizesOpenAICompatibleWAV() async throws {

@@ -92,6 +92,7 @@ public final class CoreMLForcedAligner {
         decoderComputeUnits: MLComputeUnits = CoreMLComputeUnitsResolver.resolved(default: .all),
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> CoreMLForcedAligner {
         let dir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -111,7 +112,8 @@ public final class CoreMLForcedAligner {
                 "merges.txt",
                 "tokenizer_config.json",
             ],
-            offlineMode: offlineMode
+            offlineMode: offlineMode,
+            downloadOptions: downloadOptions
         ) { fraction in
             progressHandler?(fraction * 0.8, "Downloading CoreML aligner...")
         }

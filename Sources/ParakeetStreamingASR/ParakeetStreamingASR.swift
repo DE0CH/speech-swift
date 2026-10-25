@@ -152,6 +152,7 @@ public class ParakeetStreamingASRModel {
 
     public static func fromPretrained(
         modelId: String? = nil,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> ParakeetStreamingASRModel {
         let effectiveModelId = modelId ?? defaultModelId
@@ -176,7 +177,8 @@ public class ParakeetStreamingASRModel {
                     "joint.mlmodelc/**",
                     "vocab.json",
                     "config.json",
-                ]
+                ],
+                downloadOptions: downloadOptions
             ) { fraction in
                 progressHandler?(fraction * 0.7, "Downloading model...")
             }
@@ -231,5 +233,13 @@ public class ParakeetStreamingASRModel {
         let mlConfig = MLModelConfiguration()
         mlConfig.computeUnits = CoreMLComputeUnitsResolver.resolved(default: computeUnits)
         return try MLModel(contentsOf: modelURL, configuration: mlConfig)
+    }
+}
+
+extension ParakeetStreamingASRModel: StreamingRecognitionModel {
+    public func makeStreamingSession(
+        language _: String? = nil
+    ) throws -> any StreamingRecognitionSession {
+        try createSession()
     }
 }

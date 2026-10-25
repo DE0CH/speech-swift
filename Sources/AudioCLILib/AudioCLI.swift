@@ -15,6 +15,7 @@ public struct AudioCLI: ParsableCommand {
             AudioTranslateCommand.self,
             VadCommand.self,
             VadStreamCommand.self,
+            TurnCommand.self,
             DiarizeCommand.self,
             EmbedSpeakerCommand.self,
             LanguageIDCommand.self,
@@ -29,6 +30,8 @@ public struct AudioCLI: ParsableCommand {
             VibeVoiceCommand.self,
             VibeVoiceEncodeCommand.self,
             TranslateCommand.self,
+            GLiNERCommand.self,
+            ClefCommand.self,
             WakeCommand.self,
             AvatarMotionCommand.self,
         ]

@@ -8,6 +8,10 @@ import VoxCPM2TTS
 import IndexTTS2TTS
 import F5TTS
 import HiggsTTS
+import BreezeTTS
+import VoxtralTTS
+import FishAudioTTS
+import PocketTTS
 import IndicMioTTS
 import MagpieTTS
 import MagpieTTSCoreML
@@ -17,13 +21,13 @@ import SpeechRestoration
 public struct SpeakCommand: ParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "speak",
-        abstract: "Text-to-speech synthesis (Qwen3-TTS, CosyVoice, VoxCPM2, IndexTTS2, F5-TTS, Higgs, Indic-Mio, or Magpie). For CoreML, use the `qwen3-tts-coreml` subcommand."
+        abstract: "Text-to-speech synthesis (Qwen3-TTS, CosyVoice, VoxCPM2, Pocket TTS, Voxtral, Fish Drama 3, IndexTTS2, F5-TTS, Higgs, Breeze TTS 2, Indic-Mio, Magpie, or MOSS-TTS-Nano). For Qwen3-TTS CoreML, use the `qwen3-tts-coreml` subcommand."
     )
 
     @Argument(help: "Text to synthesize (omit when using --list-speakers or --batch-file)")
     public var text: String?
 
-    @Option(name: .long, help: "TTS engine: qwen3 (default), cosyvoice, voxcpm2, indextts2, f5, higgs, indic-mio, magpie, or magpie-coreml")
+    @Option(name: .long, help: "TTS engine: qwen3 (default), cosyvoice, voxcpm2, pocket, voxtral, fish-drama3, indextts2, f5, higgs, breeze, indic-mio, magpie, magpie-coreml, or moss-nano")
     public var engine: String = "qwen3"
 
     @Option(name: .shortAndLong, help: "Output WAV file path")
@@ -38,18 +42,42 @@ public struct SpeakCommand: ParsableCommand {
     @Flag(name: .long, help: "Play audio through default output device instead of (or in addition to) saving a file")
     public var play: Bool = false
 
+    @Option(name: .long, help: "[pocket] Local compiled CoreML bundle directory")
+    public var pocketBundleDir: String?
+
+    @Option(name: .long, help: "[pocket] HuggingFace CoreML bundle ID")
+    public var pocketModelId: String = PocketTTSModel.defaultModelId
+
+    @Option(name: .long, help: "[pocket] Deterministic noise seed (0 is valid)")
+    public var pocketSeed: UInt64 = 42
+
+    @Option(name: .long, help: "[pocket] Maximum frames per text chunk; exceeding the limit throws")
+    public var pocketMaxFrames: Int = 350
+
     // MARK: - Qwen3-specific options
 
     @Option(name: .long, help: "[qwen3] Speaker voice (requires --model customVoice)")
     public var speaker: String?
 
-    @Option(name: .long, help: "[qwen3] Style instruction (requires CustomVoice model)")
+    @Option(name: .long, help: "[qwen3/breeze] Style or voice-design instruction (Qwen3 requires CustomVoice)")
     public var instruct: String?
 
-    @Option(name: .long, help: "Reference audio file for voice cloning (qwen3 Base, cosyvoice, voxcpm2, indextts2, f5, higgs, or indic-mio)")
+    @Option(name: .long, help: "Reference audio file for voice cloning (qwen3 Base, cosyvoice, voxcpm2, fish-drama3, indextts2, f5, higgs, breeze, indic-mio, or moss-nano)")
     public var voiceSample: String?
 
-    @Flag(name: .long, help: "Restore (denoise + dereverb) the voice-cloning reference with Sidon before cloning. Opt-in; preserves speaker identity. Applies to qwen3/cosyvoice/voxcpm2/f5/higgs/indic-mio references.")
+    @Option(name: .long, help: "[moss-nano] HuggingFace model ID or local compiled model directory")
+    public var mossNanoModel: String = "aufklarer/MOSS-TTS-Nano-100M-CoreML"
+
+    @Option(name: .long, help: "[moss-nano] CoreML compute units: cpu (default) or gpu (CPU+GPU)")
+    public var mossNanoComputeUnits: String = "cpu"
+
+    @Option(name: .long, help: "[moss-nano] Maximum 80 ms audio frames; reaching the limit raises an error")
+    public var mossNanoMaxFrames: Int = 300
+
+    @Option(name: .long, help: "[moss-nano] Reproducible Swift sampling seed")
+    public var mossNanoSeed: UInt64 = 0
+
+    @Flag(name: .long, help: "Restore (denoise + dereverb) the voice-cloning reference with Sidon before cloning. Opt-in; preserves speaker identity. Applies to qwen3/cosyvoice/voxcpm2/fish-drama3/f5/higgs/breeze/indic-mio/moss-nano references.")
     public var cleanReference: Bool = false
 
     @Option(name: .long, help: "Sidon variant for --clean-reference: fp16 (default) or int8")
@@ -58,7 +86,7 @@ public struct SpeakCommand: ParsableCommand {
     @Option(name: .long, help: "[qwen3] Model variant: base (default), base-8bit, 1.7b (bf16), 1.7b-8bit, customVoice (bf16), or full HF model ID. Note: --speaker requires customVoice.")
     public var model: String = "base"
 
-    @Flag(name: .long, help: "[qwen3] List available speakers and exit")
+    @Flag(name: .long, help: "[qwen3/pocket/voxtral] List available speakers and exit")
     public var listSpeakers: Bool = false
 
     @Option(name: .long, help: "[qwen3/indic-mio] Sampling temperature (default: 0.3)")
@@ -102,7 +130,7 @@ public struct SpeakCommand: ParsableCommand {
     @Option(name: .long, help: "[cosyvoice] Crossfade between turns in seconds (default 0)")
     public var crossfade: Float = 0.0
 
-    @Option(name: .long, help: "[cosyvoice] MLX seed applied before each synthesis call. Fixes the flow-matching noise + Gumbel sampling + HiFiGAN init phase, so repeated calls with the same speaker embedding produce near-identical prosody and timbre across sections. Useful for long-form narration cut into chunks.")
+    @Option(name: .long, help: "[fish-drama3] Request-local sampling seed (default 0). [cosyvoice] MLX seed applied before each synthesis call. Fixes the flow-matching noise + Gumbel sampling + HiFiGAN init phase, so repeated calls with the same speaker embedding produce near-identical prosody and timbre across sections. Useful for long-form narration cut into chunks.")
     public var seed: UInt64?
 
     @Option(name: .long, help: "[cosyvoice] Path to speech_tokenizer.safetensors (S3-Tokenizer-v3). When supplied, --voice-sample is upgraded from spk-only cloning (cos~0.83 cap) to upstream zero-shot conditioning with prompt_token + prompt_feat (preserves identity through emotion changes). Auto-detected in the bundle's cache dir if omitted.")
@@ -148,6 +176,55 @@ public struct SpeakCommand: ParsableCommand {
 
     @Option(name: .long, help: "[voxcpm2] Warmup patches to skip before emitting audio")
     public var voxcpm2WarmupPatches: Int = 0
+
+    // MARK: - Voxtral-specific options
+
+    @Option(name: .long, help: "[voxtral] HuggingFace MLX model ID")
+    public var voxtralModelId: String = VoxtralTTSModel.defaultModelId
+
+    @Option(name: .long, help: "[voxtral] Load a local exported bundle instead of HuggingFace")
+    public var voxtralBundleDir: String?
+
+    @Option(name: .long, help: "[voxtral] Preset voice (default casual_male, or the language's male preset); see --list-speakers")
+    public var voxtralVoice: String?
+
+    @Option(name: .long, help: "[voxtral] Maximum audio frames (500 = 40 seconds); reaching the limit reports an error")
+    public var voxtralMaxFrames: Int = 500
+
+    @Option(name: .long, help: "[voxtral] Per-request random seed (default 0)")
+    public var voxtralSeed: UInt64 = 0
+
+    @Option(name: .long, help: "[voxtral] Codec frames per streaming chunk (default 3 = 240 ms of audio)")
+    public var voxtralChunkFrames: Int = 3
+
+    // MARK: - Fish Audio Drama 3 options
+
+    @Option(name: .long, help: "[fish-drama3] HuggingFace MLX model ID")
+    public var fishDrama3ModelId: String = FishAudioDrama3Model.defaultModelId
+
+    @Option(name: .long, help: "[fish-drama3] Load a local exported MLX bundle")
+    public var fishDrama3BundleDir: String?
+
+    @Option(name: .long, help: "[fish-drama3] Exact transcript of --voice-sample")
+    public var fishDrama3ReferenceText: String?
+
+    @Option(name: .long, help: "[fish-drama3] Maximum generated frames; 2048 frames is about 95 seconds")
+    public var fishDrama3MaxFrames: Int = 2_048
+
+    @Option(name: .long, help: "[fish-drama3] Sampling temperature (default 1; 0 is greedy)")
+    public var fishDrama3Temperature: Float = 1
+
+    @Option(name: .long, help: "[fish-drama3] Top-k sampling (default 30)")
+    public var fishDrama3TopK: Int = 30
+
+    @Option(name: .long, help: "[fish-drama3] Nucleus sampling probability (default 0.9)")
+    public var fishDrama3TopP: Float = 0.9
+
+    @Option(name: .long, help: "[fish-drama3] Codec frames per streamed chunk (1–128; default 3, about 139 ms of audio)")
+    public var fishDrama3ChunkFrames: Int = 3
+
+    @Option(name: .long, help: "[fish-drama3] Memory policy: balanced (default) or unrestricted")
+    public var fishDrama3MemoryMode: String = "balanced"
 
     // MARK: - IndexTTS2-specific options
 
@@ -203,6 +280,35 @@ public struct SpeakCommand: ParsableCommand {
 
     @Option(name: .long, help: "[f5] Reference RMS normalization target (default 0.1)")
     public var f5TargetRMS: Float = 0.1
+
+    // MARK: - Breeze-specific options
+
+    @Option(name: .long, help: "[breeze] Hugging Face MLX bundle ID")
+    public var breezeModelId: String = BreezeTTSModel.defaultModelId
+
+    @Option(name: .long, help: "[breeze] Load a local MLX bundle directory")
+    public var breezeBundleDir: String?
+
+    @Option(name: .long, help: "[breeze] Exact transcript of --voice-sample; required for cloning")
+    public var breezeReferenceText: String?
+
+    @Option(name: .long, help: "[breeze] Sampling temperature; 0 selects greedy decoding")
+    public var breezeTemperature: Float = 0.9
+
+    @Option(name: .long, help: "[breeze] Top-k sampling; 0 disables")
+    public var breezeTopK: Int = 50
+
+    @Option(name: .long, help: "[breeze] Nucleus sampling threshold")
+    public var breezeTopP: Float = 1
+
+    @Option(name: .long, help: "[breeze] Instruction guidance scale; 1 disables CFG")
+    public var breezeCfgScale: Float = 4
+
+    @Option(name: .long, help: "[breeze] Maximum 80 ms codec frames; reaching the cap throws")
+    public var breezeMaxFrames: Int = 750
+
+    @Option(name: .long, help: "[breeze] Reproducible sampling seed")
+    public var breezeSeed: UInt64 = 42
 
     // MARK: - Higgs-specific options
 
@@ -285,11 +391,62 @@ public struct SpeakCommand: ParsableCommand {
     public func validate() throws {
         let eng = engine.lowercased()
         guard eng == "qwen3" || eng == "cosyvoice" || eng == "voxcpm2"
-                || eng == "indextts2" || eng == "f5" || eng == "higgs" || eng == "indic-mio" || eng == "magpie" || eng == "magpie-coreml" else {
-            throw ValidationError("--engine must be 'qwen3', 'cosyvoice', 'voxcpm2', 'indextts2', 'f5', 'higgs', 'indic-mio', 'magpie', or 'magpie-coreml'. For Qwen3-TTS CoreML, use the `qwen3-tts-coreml` subcommand.")
+                || eng == "voxtral" || eng == "pocket" || eng == "fish-drama3"
+                || eng == "indextts2" || eng == "f5" || eng == "higgs" || eng == "breeze" || eng == "indic-mio" || eng == "magpie" || eng == "magpie-coreml" || eng == "moss-nano" else {
+            throw ValidationError("--engine must be 'qwen3', 'cosyvoice', 'voxcpm2', 'pocket', 'voxtral', 'fish-drama3', 'indextts2', 'f5', 'higgs', 'breeze', 'indic-mio', 'magpie', 'magpie-coreml', or 'moss-nano'. For Qwen3-TTS CoreML, use the `qwen3-tts-coreml` subcommand.")
         }
         if text == nil && batchFile == nil && !listSpeakers {
             throw ValidationError("Either a text argument, --batch-file, or --list-speakers must be provided")
+        }
+        if eng == "fish-drama3" {
+            guard ["balanced", "unrestricted"].contains(fishDrama3MemoryMode) else {
+                throw ValidationError("--fish-drama3-memory-mode must be 'balanced' or 'unrestricted'")
+            }
+            if batchFile != nil || listSpeakers || instruct != nil || speaker != nil {
+                throw ValidationError("--engine fish-drama3 requires complete input text; use inline emotion and <|speaker:N|> tags")
+            }
+            if (voiceSample == nil) != (fishDrama3ReferenceText == nil) {
+                throw ValidationError("--voice-sample and --fish-drama3-reference-text must be provided together")
+            }
+            try FishAudioDrama3Options(maxFrames: fishDrama3MaxFrames, temperature: fishDrama3Temperature,
+                                       topK: fishDrama3TopK, topP: fishDrama3TopP, seed: seed ?? 0,
+                                       streamingChunkFrames: fishDrama3ChunkFrames).validate()
+            if let text { try FishAudioDrama3Prompt.validateText(text) }
+            if let reference = fishDrama3ReferenceText { try FishAudioDrama3Prompt.validateText(reference) }
+        }
+        if eng == "moss-nano" {
+            guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  batchFile == nil, !listSpeakers else {
+                throw ValidationError("--engine moss-nano requires a single nonempty text argument")
+            }
+            guard ["cpu", "gpu"].contains(mossNanoComputeUnits), (1...65536).contains(mossNanoMaxFrames) else {
+                throw ValidationError("--moss-nano-compute-units must be cpu or gpu; --moss-nano-max-frames must be in 1...65536")
+            }
+            if speaker != nil || instruct != nil || language != nil {
+                throw ValidationError("--engine moss-nano infers language from text and uses --voice-sample for cloning; --speaker, --instruct and --language are unsupported")
+            }
+            if cleanReference && voiceSample == nil { throw ValidationError("--clean-reference requires --voice-sample") }
+        }
+        if eng == "pocket" {
+            if batchFile != nil || voiceSample != nil || cleanReference || instruct != nil || speaker != nil {
+                throw ValidationError("--engine pocket supports one English text and the fixed Alba preset")
+            }
+            try PocketTTSOptions(seed: pocketSeed, maxFrames: pocketMaxFrames).validate()
+            try PocketTTSModel.validate(language: language)
+            if let text { try PocketTTSModel.validateInput(text: text, language: language) }
+        }
+        if eng == "voxtral" {
+            if batchFile != nil {
+                throw ValidationError("--engine voxtral does not support --batch-file")
+            }
+            if voiceSample != nil || cleanReference || instruct != nil || speaker != nil {
+                throw ValidationError("--engine voxtral uses preset voices; select --voxtral-voice or --list-speakers")
+            }
+            try VoxtralTTSOptions(maxFrames: voxtralMaxFrames, seed: voxtralSeed,
+                                 streamingChunkFrames: voxtralChunkFrames).validate()
+            let voice = try voxtralVoice ?? VoxtralTTSModel.voice(for: language)
+            guard VoxtralTTSModel.voices.contains(voice) else { throw ValidationError("Unknown --voxtral-voice: \(voice)") }
+            if let text { _ = try VoxtralTTSTokenizer.normalizedText(text) }
         }
         if eng == "voxcpm2" {
             if batchFile != nil || listSpeakers {
@@ -344,6 +501,23 @@ public struct SpeakCommand: ParsableCommand {
             if instruct != nil {
                 throw ValidationError("--engine f5 does not support --instruct")
             }
+        }
+        if eng == "breeze" {
+            guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  batchFile == nil, !listSpeakers, speaker == nil else {
+                throw ValidationError("--engine breeze requires one nonempty text; use --instruct for voice design")
+            }
+            if let language, !["en", "english", "zh", "chinese", "zh-cn", "mandarin"].contains(language.lowercased()) {
+                throw ValidationError("Breeze supports English and Chinese; language is inferred from text")
+            }
+            guard (voiceSample == nil) == (breezeReferenceText == nil) else {
+                throw ValidationError("--voice-sample and --breeze-reference-text must be provided together")
+            }
+            if let reference = breezeReferenceText, reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw ValidationError("--breeze-reference-text must be nonempty")
+            }
+            if cleanReference && voiceSample == nil { throw ValidationError("--clean-reference requires --voice-sample") }
+            try breezeOptions().validate()
         }
         if eng == "higgs" {
             if batchFile != nil || listSpeakers {
@@ -452,6 +626,12 @@ public struct SpeakCommand: ParsableCommand {
 
     public func run() throws {
         switch engine.lowercased() {
+        case "fish-drama3":
+            try runFishDrama3()
+        case "pocket":
+            try runPocket()
+        case "voxtral":
+            try runVoxtral()
         case "cosyvoice":
             try runCosyVoice()
         case "voxcpm2":
@@ -460,6 +640,8 @@ public struct SpeakCommand: ParsableCommand {
             try runIndexTTS2()
         case "f5":
             try runF5TTS()
+        case "breeze":
+            try runBreeze()
         case "higgs":
             try runHiggs()
         case "indic-mio":
@@ -468,6 +650,8 @@ public struct SpeakCommand: ParsableCommand {
             try runMagpie()
         case "magpie-coreml":
             try runMagpieCoreML()
+        case "moss-nano":
+            try runMossNano()
         default:
             try runQwen3()
         }
@@ -1027,6 +1211,68 @@ public struct SpeakCommand: ParsableCommand {
         }
     }
 
+    // MARK: - Fish Audio Drama 3 engine
+
+    private func runFishDrama3() throws {
+        try runAsync {
+            guard let inputText = text else { throw ValidationError("Text is required for Fish Audio Drama 3") }
+            let model: FishAudioDrama3Model
+            let memoryOptions: FishAudioMemoryOptions = fishDrama3MemoryMode == "unrestricted" ? .unrestricted : .balanced
+            if let directory = fishDrama3BundleDir {
+                model = try await FishAudioDrama3Model.fromBundle(URL(fileURLWithPath: directory), memoryOptions: memoryOptions,
+                                                                progressHandler: reportProgress)
+            } else {
+                model = try await FishAudioDrama3Model.fromPretrained(modelId: fishDrama3ModelId, memoryOptions: memoryOptions,
+                                                                    progressHandler: reportProgress)
+            }
+            let options = FishAudioDrama3Options(maxFrames: fishDrama3MaxFrames, temperature: fishDrama3Temperature,
+                                                topK: fishDrama3TopK, topP: fishDrama3TopP, seed: seed ?? 0,
+                                                streamingChunkFrames: fishDrama3ChunkFrames)
+            let reference = try voiceSample.map { try loadReference(path: $0, targetSampleRate: model.sampleRate) }
+            let player = stream && play ? StreamingAudioPlayer() : nil
+            defer { player?.stop() }
+            if let player {
+                player.preBufferDuration = 0.16
+                player.skipInitialSilence = false
+                try player.start(sampleRate: Double(model.sampleRate))
+            }
+            let start = CFAbsoluteTimeGetCurrent()
+            var samples: [Float] = []
+            if stream {
+                var firstAudio: Double?
+                var chunks = 0
+                let deliver: (AudioChunk) async throws -> Void = { chunk in
+                    if !chunk.samples.isEmpty {
+                        if firstAudio == nil { firstAudio = CFAbsoluteTimeGetCurrent() - start }
+                        chunks += 1
+                        samples.append(contentsOf: chunk.samples)
+                        player?.scheduleChunk(chunk.samples)
+                        if verbose { print("  Chunk \(chunks): \(chunk.samples.count) samples, frame \(chunk.frameIndex)") }
+                    }
+                }
+                if let reference, let transcript = fishDrama3ReferenceText {
+                    try await model.generateStreaming(text: inputText, referenceAudio: reference,
+                        referenceSampleRate: model.sampleRate, referenceText: transcript, options: options, onChunk: deliver)
+                } else {
+                    try await model.generateStreaming(text: inputText, options: options, onChunk: deliver)
+                }
+                print(String(format: "  First audio: %.0f ms, chunks: %d", (firstAudio ?? 0) * 1000, chunks))
+            } else if let reference, let transcript = fishDrama3ReferenceText {
+                samples = try await model.generate(text: inputText, referenceAudio: reference,
+                    referenceSampleRate: model.sampleRate, referenceText: transcript, options: options)
+            } else { samples = try await model.generate(text: inputText, options: options) }
+            if let player {
+                let elapsed = CFAbsoluteTimeGetCurrent() - start
+                let duration = Double(samples.count) / Double(model.sampleRate)
+                print(String(format: "  %.2fs audio in %.2fs (RTF %.2f)", duration, elapsed, elapsed / duration))
+                player.markGenerationComplete()
+                while player.isPlaying { try await Task.sleep(for: .milliseconds(20)) }
+            } else {
+                try writeOrPlay(samples: samples, sampleRate: model.sampleRate, t0: start)
+            }
+        }
+    }
+
     // MARK: - IndexTTS2 engine
 
     private func runIndexTTS2() throws {
@@ -1232,6 +1478,179 @@ public struct SpeakCommand: ParsableCommand {
             } else {
                 try WAVWriter.write(samples: audio, sampleRate: model.sampleRate, to: outputURL)
                 print("Saved \(audio.count) samples (\(formatDuration(audio.count, sampleRate: model.sampleRate))s) to \(output)")
+            }
+        }
+    }
+
+    // MARK: - Voxtral engine
+
+    private func runVoxtral() throws {
+        if listSpeakers {
+            print("Voxtral preset voices (use --voxtral-voice):")
+            for voice in VoxtralTTSModel.voices { print("  - \(voice)") }
+            return
+        }
+        try runAsync {
+            guard let text else { throw ValidationError("Voxtral requires text") }
+            let model: VoxtralTTSModel
+            if let bundleDir = voxtralBundleDir {
+                model = try VoxtralTTSModel.fromBundle(URL(fileURLWithPath: bundleDir))
+            } else {
+                model = try await VoxtralTTSModel.fromPretrained(modelId: voxtralModelId, progressHandler: reportProgress)
+            }
+            let voice = try voxtralVoice ?? VoxtralTTSModel.voice(for: language)
+            let start = CFAbsoluteTimeGetCurrent()
+            let options = VoxtralTTSOptions(maxFrames: voxtralMaxFrames, seed: voxtralSeed,
+                                           streamingChunkFrames: voxtralChunkFrames)
+            let player = stream && play ? StreamingAudioPlayer() : nil
+            defer { player?.stop() }
+            if let player {
+                player.preBufferDuration = 0.16
+                player.skipInitialSilence = false
+                try player.start(sampleRate: Double(model.sampleRate))
+            }
+            var samples: [Float] = []
+            if stream {
+                var firstAudio: Double?
+                var chunks = 0
+                try await model.generateStreaming(text: text, voice: voice, options: options) { chunk in
+                    if !chunk.samples.isEmpty {
+                        if firstAudio == nil { firstAudio = CFAbsoluteTimeGetCurrent() - start }
+                        chunks += 1
+                        samples.append(contentsOf: chunk.samples)
+                        player?.scheduleChunk(chunk.samples)
+                        if verbose { print("  Chunk \(chunks): \(chunk.samples.count) samples, frame \(chunk.frameIndex)") }
+                    }
+                }
+                print(String(format: "  First audio: %.0f ms, chunks: %d", (firstAudio ?? 0) * 1000, chunks))
+            } else {
+                samples = try await model.generate(text: text, voice: voice, options: options)
+            }
+            let elapsed = CFAbsoluteTimeGetCurrent() - start
+            let duration = Double(samples.count) / Double(model.sampleRate)
+            print(String(format: "  Duration: %.2fs, Time: %.2fs, RTF: %.3f", duration, elapsed, elapsed / duration))
+            if let player {
+                player.markGenerationComplete()
+                while player.isPlaying { try await Task.sleep(for: .milliseconds(20)) }
+            } else if play {
+                playAudio(samples: samples, sampleRate: model.sampleRate)
+            } else {
+                try WAVWriter.write(samples: samples, sampleRate: model.sampleRate, to: URL(fileURLWithPath: output))
+                print("Saved \(samples.count) samples to \(output)")
+            }
+        }
+    }
+
+    private func runPocket() throws {
+        if listSpeakers {
+            print("Pocket TTS preset voice: alba")
+
+            return
+        }
+        try runAsync {
+            guard let text else { throw ValidationError("Pocket TTS requires text") }
+            let model: PocketTTSModel
+            if let bundleDir = pocketBundleDir {
+                model = try PocketTTSModel.fromBundle(URL(fileURLWithPath: bundleDir))
+            } else {
+                model = try await PocketTTSModel.fromPretrained(modelId: pocketModelId, progressHandler: reportProgress)
+            }
+            let start = CFAbsoluteTimeGetCurrent()
+            let options = PocketTTSOptions(seed: pocketSeed, maxFrames: pocketMaxFrames)
+            let player = stream && play ? StreamingAudioPlayer() : nil
+            defer { player?.stop() }
+            if let player {
+                player.preBufferDuration = 0.16
+                player.skipInitialSilence = false
+                try player.start(sampleRate: Double(model.sampleRate))
+            }
+            var samples: [Float] = []
+            if stream {
+                var firstAudio: Double?
+                var chunks = 0
+                try await model.generateStreaming(text: text, language: language, options: options) { chunk in
+                    if !chunk.samples.isEmpty {
+                        if firstAudio == nil { firstAudio = CFAbsoluteTimeGetCurrent() - start }
+                        chunks += 1
+                        samples.append(contentsOf: chunk.samples)
+                        player?.scheduleChunk(chunk.samples)
+                        if verbose { print("  Chunk \(chunks): \(chunk.samples.count) samples, frame \(chunk.frameIndex)") }
+                    }
+                }
+                print(String(format: "  First audio: %.0f ms, chunks: %d", (firstAudio ?? 0) * 1000, chunks))
+            } else {
+                samples = try await model.generate(text: text, language: language, options: options)
+            }
+            let elapsed = CFAbsoluteTimeGetCurrent() - start
+            let duration = Double(samples.count) / Double(model.sampleRate)
+            print(String(format: "  Duration: %.2fs, Time: %.2fs, RTF: %.3f", duration, elapsed, elapsed / duration))
+            if let player {
+                player.markGenerationComplete()
+                while player.isPlaying { try await Task.sleep(for: .milliseconds(20)) }
+            } else if play {
+                playAudio(samples: samples, sampleRate: model.sampleRate)
+            } else {
+                try WAVWriter.write(samples: samples, sampleRate: model.sampleRate, to: URL(fileURLWithPath: output))
+                print("Saved \(samples.count) samples to \(output)")
+            }
+        }
+    }
+
+    // MARK: - Breeze engine
+
+    private func breezeOptions() -> BreezeTTSOptions {
+        BreezeTTSOptions(temperature: breezeTemperature, topK: breezeTopK, topP: breezeTopP,
+            cfgScale: breezeCfgScale, maxFrames: breezeMaxFrames, seed: breezeSeed,
+            firstChunkFrames: firstChunkFrames, chunkFrames: chunkFrames)
+    }
+
+    private func runBreeze() throws {
+        try runAsync {
+            guard let text else { throw ValidationError("Breeze requires text") }
+            let loadStart = CFAbsoluteTimeGetCurrent()
+            let model: BreezeTTSModel
+            if let directory = breezeBundleDir {
+                model = try await BreezeTTSModel.fromBundle(URL(fileURLWithPath: directory), progressHandler: reportProgress)
+            } else {
+                model = try await BreezeTTSModel.fromPretrained(modelId: breezeModelId, progressHandler: reportProgress)
+            }
+            print(String(format: "  Model load: %.2fs", CFAbsoluteTimeGetCurrent() - loadStart))
+            let reference = try voiceSample.map { try loadReference(path: $0, targetSampleRate: model.sampleRate) }
+            let player = stream && play ? StreamingAudioPlayer() : nil
+            defer { player?.stop() }
+            if let player {
+                player.preBufferDuration = max(0.16, Double(chunkFrames) / 12.5)
+                player.skipInitialSilence = false
+                try player.start(sampleRate: Double(model.sampleRate))
+            }
+            let start = CFAbsoluteTimeGetCurrent()
+            var samples: [Float] = []
+            var firstAudio: Double?
+            if stream {
+                try await model.generateStreaming(text: text, instruction: instruct, referenceAudio: reference,
+                    referenceText: breezeReferenceText, language: language, options: breezeOptions()) { chunk in
+                    if !chunk.samples.isEmpty {
+                        if firstAudio == nil { firstAudio = CFAbsoluteTimeGetCurrent() - start }
+                        samples += chunk.samples
+                        player?.scheduleChunk(chunk.samples)
+                    }
+                }
+            } else {
+                samples = try await model.generate(text: text, instruction: instruct, referenceAudio: reference,
+                    referenceText: breezeReferenceText, language: language, options: breezeOptions())
+            }
+            let elapsed = CFAbsoluteTimeGetCurrent() - start
+            let duration = Double(samples.count) / Double(model.sampleRate)
+            if let firstAudio { print(String(format: "  First audio: %.0f ms", firstAudio * 1000)) }
+            print(String(format: "  Duration: %.2fs, Time: %.2fs, RTF: %.3f", duration, elapsed, elapsed / max(duration, 0.001)))
+            if let player {
+                player.markGenerationComplete()
+                while player.isPlaying { try await Task.sleep(for: .milliseconds(20)) }
+            } else if play {
+                playAudio(samples: samples, sampleRate: model.sampleRate)
+            } else {
+                try WAVWriter.write(samples: samples, sampleRate: model.sampleRate, to: URL(fileURLWithPath: output))
+                print("Saved \(samples.count) samples to \(output)")
             }
         }
     }
@@ -1554,7 +1973,7 @@ public struct SpeakCommand: ParsableCommand {
                     }
                 } else {
                     print("  No speech_tokenizer.safetensors in bundle — falling back to spk-only cloning (cap ≈ cos 0.83).")
-                    print("    Re-export the bundle with `convert_speech_tokenizer` (speech-models) to enable.")
+                    print("    A bundle that includes speech_tokenizer.safetensors enables it.")
                 }
             }
 

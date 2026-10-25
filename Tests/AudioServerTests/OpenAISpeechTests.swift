@@ -19,6 +19,20 @@ final class OpenAISpeechTests: XCTestCase {
         XCTAssertEqual(request.responseFormat, .wav)
         XCTAssertEqual(request.speed, 1.0)
         XCTAssertEqual(request.language, "english")
+        XCTAssertFalse(request.stream)
+    }
+
+    func testStreamingRequiresExplicitPCMFormat() throws {
+        let pcm = try OpenAISpeechRequest.parse(jsonData([
+            "model": "voxtral-tts", "input": "Hello", "voice": "casual_male",
+            "stream": true, "response_format": "pcm",
+        ]))
+        XCTAssertTrue(pcm.stream)
+        XCTAssertThrowsError(try OpenAISpeechRequest.parse(jsonData([
+            "model": "voxtral-tts", "input": "Hello", "voice": "casual_male", "stream": true,
+        ]))) { error in
+            XCTAssertEqual(error as? OpenAISpeechRequestError, .streamingRequiresPCM)
+        }
     }
 
     func testParsesPCMAndOptionalFields() throws {

@@ -2,6 +2,7 @@ import Darwin
 
 public struct ProcessMemoryUsage: Sendable {
     public let residentBytes: UInt64
+    public let peakResidentBytes: UInt64
     public let physicalFootprintBytes: UInt64
     public let peakPhysicalFootprintBytes: UInt64
 }
@@ -14,8 +15,10 @@ public struct ProcessMemoryUsage: Sendable {
 /// the better estimate of the process's actual pressure on unified memory.
 public func currentProcessMemoryUsage() -> ProcessMemoryUsage {
     let footprint = physicalFootprintUsage()
+    let resident = residentUsage()
     return ProcessMemoryUsage(
-        residentBytes: currentRSSBytes(),
+        residentBytes: resident.current,
+        peakResidentBytes: resident.peak,
         physicalFootprintBytes: footprint.current,
         peakPhysicalFootprintBytes: footprint.peak)
 }
@@ -26,6 +29,10 @@ public func currentProcessMemoryUsage() -> ProcessMemoryUsage {
 /// but it can undercount file-backed MLX allocations. For deployment sizing,
 /// use ``currentPhysicalFootprintBytes()``. Returns 0 on error.
 public func currentRSSBytes() -> UInt64 {
+    residentUsage().current
+}
+
+private func residentUsage() -> (current: UInt64, peak: UInt64) {
     var info = mach_task_basic_info()
     var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info_data_t>.size / MemoryLayout<integer_t>.size)
     let kerr = withUnsafeMutablePointer(to: &info) { ptr -> kern_return_t in
@@ -33,8 +40,8 @@ public func currentRSSBytes() -> UInt64 {
             task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), p, &count)
         }
     }
-    guard kerr == KERN_SUCCESS else { return 0 }
-    return UInt64(info.resident_size)
+    guard kerr == KERN_SUCCESS else { return (0, 0) }
+    return (UInt64(info.resident_size), max(UInt64(info.resident_size), UInt64(info.resident_size_max)))
 }
 
 /// Returns the current process's physical footprint, in bytes.

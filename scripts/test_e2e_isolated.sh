@@ -35,12 +35,31 @@ if ! swift test list --skip-build --disable-sandbox > "$LOG_DIR/all-tests.txt" 2
   cat "$LOG_DIR/list.err" >&2
   exit 2
 fi
-E2E_CLASSES=$(sed -E 's|/.*||' "$LOG_DIR/all-tests.txt" | sort -u | awk -F. '$2 ~ /^E2E/')
+# Include legacy suffix-named classes as well as the required E2E prefix.
+# This matches the E2E exclusion used by CI's unit phase.
+E2E_CLASSES=$(sed -E 's|/.*||' "$LOG_DIR/all-tests.txt" | sort -u | awk -F. '$2 ~ /E2E/')
 
 if [[ -z "$ONLY_FILTER" && "${E2E_SKIP_UNIT:-0}" != "1" ]]; then
-  echo "== Unit phase (single process, --skip E2E) =="
-  if swift test --skip-build --disable-sandbox --skip E2E > "$LOG_DIR/unit.log" 2>&1; then
-    record PASS "unit-phase" "$(grep -cE "Test Case .* passed" "$LOG_DIR/unit.log") cases"
+  # Keep this selection in sync with .github/workflows/tests.yml. Some older
+  # model-loading suites do not use the E2E naming convention.
+  UNIT_SKIPS=(
+    E2E StreamingASRTests ForcedAlignerTests SileroVADTests SpeechVADTests
+    WeSpeakerTests SortformerTests PersonaPlexTests ParakeetASRTests
+    CosyVoiceTTSTests KokoroTTSTests StreamingAudioPlayerTests
+  )
+  UNIT_ARGS=()
+  for SUITE in "${UNIT_SKIPS[@]}"; do UNIT_ARGS+=(--skip "$SUITE"); done
+  echo "== Unit phase (CI selection, no parallel execution) =="
+  if SPEECH_COREML_COMPUTE_UNITS="${SPEECH_COREML_COMPUTE_UNITS:-cpuOnly}" \
+      swift test --skip-build --disable-sandbox --no-parallel "${UNIT_ARGS[@]}" > "$LOG_DIR/unit.log" 2>&1; then
+    N=$(grep -cE "Test Case .* passed" "$LOG_DIR/unit.log" || true)
+    S=$(grep -cE "Test Case .* skipped" "$LOG_DIR/unit.log" || true)
+    if [[ "$N" == "0" && "$S" == "0" ]]; then
+      OVERALL=1
+      record FAIL "unit-phase" "no test cases executed; see $LOG_DIR/unit.log"
+    else
+      record PASS "unit-phase" "$N passed, $S skipped"
+    fi
   else
     OVERALL=1
     record FAIL "unit-phase" "see $LOG_DIR/unit.log"
@@ -57,10 +76,17 @@ for MC in $E2E_CLASSES; do
     continue
   fi
   LOG="$LOG_DIR/$CLS.log"
-  if swift test --skip-build --disable-sandbox --filter "$MC" > "$LOG" 2>&1; then
-    N=$(grep -cE "Test Case .* passed" "$LOG")
+  if swift test --skip-build --disable-sandbox --no-parallel --filter "$MC" > "$LOG" 2>&1; then
+    N=$(grep -cE "Test Case .* passed" "$LOG" || true)
     S=$(grep -cE "Test Case .* skipped" "$LOG" || true)
-    record PASS "$MC" "$N passed, $S skipped"
+    if [[ "$N" == "0" && "$S" == "0" ]]; then
+      OVERALL=1
+      record FAIL "$MC" "no test cases executed; see $LOG"
+    elif [[ "$N" == "0" ]]; then
+      record SKIP "$MC" "0 passed, $S skipped"
+    else
+      record PASS "$MC" "$N passed, $S skipped"
+    fi
   else
     OVERALL=1
     record FAIL "$MC" "see $LOG"

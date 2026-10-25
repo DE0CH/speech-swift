@@ -13,8 +13,8 @@ public func makeMaybeQuantizedLinear(
     bits: Int
 ) -> Linear {
     if bits > 0 {
-        return QuantizedLinear(inputDimensions, outputDimensions, bias: bias,
-                               groupSize: groupSize, bits: bits)
+        return QuantizedLinear.preQuantized(inputDimensions, outputDimensions, bias: bias,
+                                            groupSize: groupSize, bits: bits)
     } else {
         return Linear(inputDimensions, outputDimensions, bias: bias)
     }

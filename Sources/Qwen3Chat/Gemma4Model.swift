@@ -272,6 +272,23 @@ public final class Gemma4KVCache {
         self.base = position
     }
 
+    /// An independent cache holding the same entries. The arrays are shared, not copied: the next
+    /// write into either cache finds the buffer held twice, so MLX cannot donate it and writes into
+    /// a new one, leaving the other cache's entries as they were.
+    func copy() -> Gemma4KVCache {
+        let copy = Gemma4KVCache(retention: retention, startingAt: base)
+        copy.storedKeys = storedKeys
+        copy.storedValues = storedValues
+        copy.count = count
+        return copy
+    }
+
+    /// The arrays this cache holds, for evaluating them where a snapshot is taken.
+    var arrays: [MLXArray] { [storedKeys, storedValues].compactMap { $0 } }
+
+    /// Bytes the stored arrays occupy, spare room included.
+    var byteCount: Int { arrays.reduce(0) { $0 + $1.nbytes } }
+
     private var capacity: Int { storedKeys?.dim(2) ?? 0 }
 
     /// How many of the oldest entries `append` will drop to fit `t` more.
@@ -402,13 +419,13 @@ public final class Gemma4Attention: Module {
         let qDim = nHeads * headDim
         let kvDim = nKVHeads * headDim
 
-        _qProj = ModuleInfo(wrappedValue: QuantizedLinear(dim, qDim, bias: false, groupSize: gs, bits: bits))
-        _oProj = ModuleInfo(wrappedValue: QuantizedLinear(qDim, dim, bias: false, groupSize: gs, bits: bits))
+        _qProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(dim, qDim, bias: false, groupSize: gs, bits: bits))
+        _oProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(qDim, dim, bias: false, groupSize: gs, bits: bits))
         _qNorm = ModuleInfo(wrappedValue: RMSNorm(dimensions: headDim, eps: c.rmsNormEps))
 
         if hasKV {
-            _kProj = ModuleInfo(wrappedValue: QuantizedLinear(dim, kvDim, bias: false, groupSize: gs, bits: bits))
-            _vProj = ModuleInfo(wrappedValue: QuantizedLinear(dim, kvDim, bias: false, groupSize: gs, bits: bits))
+            _kProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(dim, kvDim, bias: false, groupSize: gs, bits: bits))
+            _vProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(dim, kvDim, bias: false, groupSize: gs, bits: bits))
             _kNorm = ModuleInfo(wrappedValue: RMSNorm(dimensions: headDim, eps: c.rmsNormEps))
             self.vNorm = Gemma4RMSNormNoScale(dimensions: headDim, eps: c.rmsNormEps)
         } else {
@@ -550,9 +567,9 @@ public final class Gemma4MLP: Module {
         let h = c.hiddenSize, gs = c.quantGroupSize, bits = c.quantBits
         let useDoubleWide = c.useDoubleWideMLP && c.isKVSharedLayer(layerIdx)
         let inter = c.intermediateSize * (useDoubleWide ? 2 : 1)
-        _gateProj = ModuleInfo(wrappedValue: QuantizedLinear(h, inter, bias: false, groupSize: gs, bits: bits))
-        _upProj = ModuleInfo(wrappedValue: QuantizedLinear(h, inter, bias: false, groupSize: gs, bits: bits))
-        _downProj = ModuleInfo(wrappedValue: QuantizedLinear(inter, h, bias: false, groupSize: gs, bits: bits))
+        _gateProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(h, inter, bias: false, groupSize: gs, bits: bits))
+        _upProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(h, inter, bias: false, groupSize: gs, bits: bits))
+        _downProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(inter, h, bias: false, groupSize: gs, bits: bits))
         super.init()
     }
 
@@ -590,9 +607,9 @@ public final class Gemma4Layer: Module {
         _postFeedforwardLayerNorm = ModuleInfo(wrappedValue: RMSNorm(dimensions: c.hiddenSize, eps: c.rmsNormEps))
 
         let ple = c.hiddenSizePerLayerInput
-        _perLayerInputGate = ModuleInfo(wrappedValue: QuantizedLinear(
+        _perLayerInputGate = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(
             c.hiddenSize, ple, bias: false, groupSize: c.quantGroupSize, bits: c.quantBits))
-        _perLayerProjection = ModuleInfo(wrappedValue: QuantizedLinear(
+        _perLayerProjection = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(
             ple, c.hiddenSize, bias: false, groupSize: c.quantGroupSize, bits: c.quantBits))
         _postPerLayerInputNorm = ModuleInfo(wrappedValue: RMSNorm(dimensions: c.hiddenSize, eps: c.rmsNormEps))
 
@@ -689,7 +706,7 @@ public final class Gemma4Model: Module {
             embeddingCount: c.vocabSizePerLayerInput,
             dimensions: c.numHiddenLayers * c.hiddenSizePerLayerInput,
             groupSize: c.quantGroupSize, bits: c.quantBits))
-        _perLayerModelProjection = ModuleInfo(wrappedValue: QuantizedLinear(
+        _perLayerModelProjection = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(
             c.hiddenSize, c.numHiddenLayers * c.hiddenSizePerLayerInput,
             bias: false, groupSize: c.quantGroupSize, bits: c.quantBits))
         _perLayerProjectionNorm = ModuleInfo(wrappedValue: RMSNorm(
@@ -964,6 +981,15 @@ public final class Gemma4Model: Module {
         public static func initial(config c: Gemma4DenseConfig) -> InferenceState {
             InferenceState(kvCaches: Array(repeating: nil, count: c.numHiddenLayers), position: 0)
         }
+
+        /// A state that continues from the same point without sharing any cache object with this
+        /// one, so decoding from it leaves this one reusable.
+        func copied() -> InferenceState {
+            InferenceState(kvCaches: kvCaches.map { $0?.copy() }, position: position)
+        }
+
+        var arrays: [MLXArray] { kvCaches.flatMap { $0?.arrays ?? [] } }
+        var byteCount: Int { kvCaches.reduce(0) { $0 + ($1?.byteCount ?? 0) } }
     }
 
     /// Incremental forward over `T` new tokens, updating `state`'s caches in place.

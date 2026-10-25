@@ -37,6 +37,10 @@ rebooted development machines.
 - If a second SwiftPM command queues on the same `.build` lock, don't leave
   it queued — it will pile its model loads on top of the first the moment
   the lock frees. Cancel it and rerun after the first completes.
+- Never commit raw benchmark run data (per-run JSON, logs, profiler output).
+  Commit one summary report, `docs/benchmarks/<model>.md`; keep raw results
+  in a scratch directory. Test fixtures belong under `scripts/tests/fixtures/`
+  or the test target.
 
 ## Git Conventions
 
@@ -123,7 +127,7 @@ The same skills are exposed to agents that scan `.codex/skills/` through relativ
 - `Sources/MADLADTranslation/` — Text translation (MLX)
 
 **Audio Processing**
-- `Sources/SpeechVAD/` — VAD (Silero + Pyannote), speaker diarization, speaker embedding (WeSpeaker)
+- `Sources/SpeechVAD/` — VAD (Silero + Pyannote), end-of-turn detection (Smart Turn v3.2, CoreML), speaker diarization, speaker embedding (WeSpeaker)
 - `Sources/SpeechEnhancement/` — Noise suppression (DeepFilterNet3, CoreML)
 - `Sources/SpeechRestoration/` — Audio restoration (CoreML)
 - `Sources/SourceSeparation/` — Source separation (MLX)
@@ -140,6 +144,7 @@ The same skills are exposed to agents that scan `.codex/skills/` through relativ
 **On-Device LLM**
 - `Sources/Qwen3Chat/` — On-device LLM chat (Qwen3.5-0.8B, MLX INT5/INT8 + CoreML INT8)
 - `Sources/FunctionGemma/` — On-device Gemma function-calling (swift-transformers)
+- `Sources/GLiNER/` - Schema-conditioned text classification and entity spans (GLiNER2.5-Decide, DeBERTa encoder, MLX; `speech gliner` CLI command, `gliner-bench` binary)
 
 **Infrastructure**
 - `Sources/MLXCommon/` — Shared MLX utilities (weight loading, quantized layers, memory estimation, `SDPA` multi-head attention helper)
@@ -243,6 +248,7 @@ The `speech` binary is the main entry point (`audio` is a deprecated alias that 
 .build/release/speech compose "happy rock" -o music.wav # MAGNeT text-to-music (30s, 32 kHz)
 .build/release/speech kokoro "Hello" --voice af_heart   # Kokoro TTS (iOS)
 .build/release/speech qwen3-tts-coreml "Hello"          # Qwen3-TTS CoreML (6-model pipeline)
+.build/release/speech gliner classify "Remind me at 6" --labels create_reminder,other --variant int8  # GLiNER decision
 ```
 
 The `speech-server` binary exposes an HTTP + WebSocket API (Hummingbird):
@@ -276,6 +282,7 @@ docs/
     parakeet-asr.md             Parakeet TDT architecture
     personaplex.md              PersonaPlex architecture
     fireredvad.md               FireRedVAD (DFSMN) architecture
+    smart-turn-v3.md            Smart Turn v3.2 end-of-turn classifier (CoreML)
   inference/                    Pipelines, usage, configs
     qwen3-asr-inference.md      Qwen3-ASR inference pipeline
     parakeet-asr-inference.md   Parakeet TDT inference (CoreML)
@@ -285,6 +292,7 @@ docs/
     magnet-music-gen.md         MAGNeT music generation CLI + tuning
     forced-aligner.md           Forced alignment pipeline
     silero-vad.md               Silero VAD streaming
+    smart-turn.md               Smart Turn end-of-turn confirmation, tuning, CLI
     fireredvad.md               FireRedVAD inference + tuning results
     speaker-diarization.md      Speaker diarization pipeline
     speech-enhancement.md       DeepFilterNet3 pipeline
@@ -298,11 +306,11 @@ docs/
 
 **Keep local docs in sync when making code changes.**
 
-### Documentation site (soniqo-web)
+### Documentation site (soniqo.audio)
 
-The public documentation is hosted at **https://soniqo.audio** (Firebase Hosting) and lives in a separate private repository: **soniqo-web**.
+The public documentation is hosted at **https://soniqo.audio** and maintained outside this repository.
 
-**Whenever code changes are made in this repo, both local docs AND the soniqo-web site must be updated.**
+**Whenever code changes are made in this repo, both local docs AND the documentation site must be updated.**
 
 ### What requires a docs update
 
@@ -316,9 +324,10 @@ The public documentation is hosted at **https://soniqo.audio** (Firebase Hosting
 
 ### Documentation site structure
 
+Pages on the site, by URL path:
+
 ```
-soniqo-web/public/
-  index.html                Landing page (feature grid, performance stats)
+/                           Landing page (feature grid, performance stats)
   getting-started/          Installation, build instructions, quick start
   guides/
     transcribe/             Qwen3-ASR guide
@@ -344,7 +353,7 @@ Translated READMEs live in the repo root: `README_zh.md`, `README_ja.md`, `READM
 
 ### Mapping: code changes → docs pages
 
-| Code change | Local docs | soniqo-web page(s) |
+| Code change | Local docs | soniqo.audio page(s) |
 |---|---|---|
 | CLI flag added/changed | Relevant inference doc | `/cli/index.html` + relevant guide |
 | New model/module | New model + inference doc | Landing page + new guide + architecture |

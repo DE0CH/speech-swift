@@ -1,7 +1,11 @@
 import Foundation
+import MLXCommon
+import MLX
 import ArgumentParser
 import CohereTranscribeASR
+import KyutaiSTT
 import Qwen3ASR
+import Qwen3ASRRuntime
 import ParakeetASR
 import NemotronStreamingASR
 import OmnilingualASR
@@ -20,7 +24,7 @@ public struct TranscribeCommand: ParsableCommand {
     @Argument(help: "Audio file to transcribe (WAV, any sample rate)")
     public var audioFile: String
 
-    @Option(name: .long, help: "ASR engine: qwen3 (default), cohere, voxtral, moss, parakeet, nemotron, omnilingual, whisper, qwen3-coreml, or qwen3-coreml-full")
+    @Option(name: .long, help: "ASR engine: qwen3 (default), cohere, kyutai, voxtral, moss, parakeet, nemotron, omnilingual, whisper, qwen3-coreml, or qwen3-coreml-full")
     public var engine: String = "qwen3"
 
     @Option(name: .long, help: "[omnilingual] Window size in seconds: 5 or 10 (default 10) — CoreML backend only")
@@ -35,7 +39,12 @@ public struct TranscribeCommand: ParsableCommand {
     @Option(name: .long, help: "[omnilingual mlx] Quantization bits: 4 (default) or 8")
     public var bits: Int = 4
 
-    @Option(name: .shortAndLong, help: "[qwen3] 0.6B (default), 0.6B-8bit, 1.7B, or 1.7B-4bit; [cohere/voxtral] int5 (default), int8, or fp16; [moss coreml] int8 (default) or fp16; [moss mlx] int5 (default) or int8; [whisper] default or turbo; alternatively a model ID or local directory")
+    @Option(name: .long, help: "[kyutai] MLX's process-wide free-buffer cache limit in MiB for this command (default: 256; 0 disables caching)")
+    public var mlxCacheLimitMB: Int?
+
+    var effectiveKyutaiCacheLimitMB: Int { mlxCacheLimitMB ?? 256 }
+
+    @Option(name: .shortAndLong, help: "[qwen3] 0.6B (default), 0.6B-8bit, 1.7B, or 1.7B-4bit; [cohere/voxtral] int5 (default), int8, or fp16; [kyutai] int8 (default), int4, fp16, upstream, or 2.6b; [moss coreml] int8 (default) or fp16; [moss mlx] int5 (default) or int8; [whisper] default or turbo; alternatively a model ID or local directory")
     public var model: String = "0.6B"
 
     @Option(name: .long, help: "[moss] Maximum generated transcript tokens (default: Core ML 512, MLX 5120)")
@@ -50,7 +59,7 @@ public struct TranscribeCommand: ParsableCommand {
     @Option(name: .long, help: "Context string to bias recognition (e.g., 'Project: Foo, participants: Alice, Bob'). Improves proper-noun accuracy.")
     public var context: String?
 
-    @Flag(name: .long, help: "Enable streaming transcription with VAD")
+    @Flag(name: .long, help: "Enable streaming transcription (native stream for Kyutai; VAD for Qwen3)")
     public var stream: Bool = false
 
     @Option(name: .long, help: "Maximum segment duration in seconds (default 10)")
@@ -64,15 +73,29 @@ public struct TranscribeCommand: ParsableCommand {
     public func validate() throws {
         let eng = engine.lowercased()
         let supportedEngines = [
-            "qwen3", "cohere", "voxtral", "moss", "parakeet", "nemotron",
+            "qwen3", "cohere", "kyutai", "voxtral", "moss", "parakeet", "nemotron",
             "omnilingual", "whisper", "qwen3-coreml", "qwen3-coreml-full",
         ]
         guard supportedEngines.contains(eng) else {
             throw ValidationError(
                 "--engine must be one of: \(supportedEngines.joined(separator: ", "))")
         }
+        if let limit = mlxCacheLimitMB {
+            guard eng == "kyutai", (0...(Int.max / (1024 * 1024))).contains(limit) else {
+                throw ValidationError("--mlx-cache-limit-mb requires --engine kyutai and a nonnegative value that fits in bytes")
+            }
+        }
         if ["cohere", "voxtral"].contains(eng), stream {
             throw ValidationError("--stream is not supported by the \(eng) engine")
+        }
+        if eng == "kyutai" {
+            _ = try resolveKyutaiModelId(model)
+            guard language == nil && context == nil else {
+                throw ValidationError("Kyutai detects language automatically and does not accept --language or --context")
+            }
+            guard !partial || stream else {
+                throw ValidationError("Use --stream with --partial for Kyutai")
+            }
         }
         if eng == "moss" {
             guard !stream else {
@@ -117,6 +140,8 @@ public struct TranscribeCommand: ParsableCommand {
         switch engine.lowercased() {
         case "cohere":
             try runCohereTranscription()
+        case "kyutai":
+            try runKyutaiTranscription()
         case "voxtral":
             try runVoxtralTranscription()
         case "parakeet":
@@ -139,6 +164,42 @@ public struct TranscribeCommand: ParsableCommand {
             } else {
                 try runBatchTranscription()
             }
+        }
+    }
+
+    private func runKyutaiTranscription() throws {
+        try runAsync {
+            let cacheLimitLease = MLXCacheLimitCoordinator.shared.acquire(
+                ceiling: effectiveKyutaiCacheLimitMB * 1024 * 1024)
+            defer { cacheLimitLease?.release() }
+            let modelId = try resolveKyutaiModelId(model)
+            let audio = try AudioFileLoader.load(
+                url: URL(fileURLWithPath: audioFile), targetSampleRate: KyutaiSTTConfig.sampleRate)
+            let duration = Double(audio.count) / Double(KyutaiSTTConfig.sampleRate)
+            print("Loading Kyutai STT model: \(modelId)")
+            let asr = try await KyutaiSTTModel.load(
+                modelId, progressHandler: { reportProgress($0, "Downloading") })
+            let start = CFAbsoluteTimeGetCurrent()
+            let text: String
+            if stream {
+                let session = try asr.makeSession()
+                defer { session.cancel() }
+                func emit(_ tokens: [KyutaiSTTToken]) {
+                    for token in tokens { print(token.text, terminator: "") }
+                    fflush(stdout)
+                }
+                for offset in stride(from: 0, to: audio.count, by: KyutaiSTTConfig.frameSize) {
+                    emit(try session.append(Array(audio[offset..<min(offset + KyutaiSTTConfig.frameSize, audio.count)])))
+                }
+                emit(try session.finish())
+                print()
+                text = session.text
+            } else {
+                text = try asr.transcribe(audio: audio, sampleRate: KyutaiSTTConfig.sampleRate)
+            }
+            let elapsed = CFAbsoluteTimeGetCurrent() - start
+            print("Result: \(text)")
+            print(String(format: "  Time: %.2fs, RTF: %.3f", elapsed, duration > 0 ? elapsed / duration : 0))
         }
     }
 
@@ -313,12 +374,13 @@ public struct TranscribeCommand: ParsableCommand {
             print("  Loaded \(audio.count) samples (\(formatDuration(audio.count))s)")
 
             print("Loading model (\(sizeLabel)): \(modelId)")
-            let asrModel = try await Qwen3ASRModel.fromPretrained(
-                modelId: modelId, progressHandler: reportProgress)
+            let runtime = Qwen3ASRRuntime(
+                descriptor: Qwen3ASRDescriptors.mlx(modelID: modelId), progressHandler: reportProgress)
+            try await runtime.prepare()
 
             print("Transcribing...")
             let startTime = CFAbsoluteTimeGetCurrent()
-            let result = asrModel.transcribe(audio: audio, sampleRate: 24000, language: language, context: context)
+            let result = try await runtime.transcribe(audio: audio, sampleRate: 24000, language: language, context: context)
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             let duration = Float(audio.count) / 24000.0
             let rtf = elapsed / Double(duration)
@@ -413,17 +475,18 @@ public struct TranscribeCommand: ParsableCommand {
 
             if #available(macOS 15, iOS 18, *) {
                 print("Loading full CoreML ASR pipeline...")
-                let asrModel = try await CoreMLASRModel.fromPretrained(
-                    progressHandler: reportProgress)
+                let runtime = Qwen3ASRRuntime(descriptor: Qwen3ASRDescriptors.coreML,
+                                               progressHandler: reportProgress)
+                try await runtime.prepare()
 
                 print("Warming up CoreML...")
                 let warmupStart = CFAbsoluteTimeGetCurrent()
-                try asrModel.warmUp()
+                try await runtime.prepare(warmUp: true)
                 let warmupTime = CFAbsoluteTimeGetCurrent() - warmupStart
 
                 print("Transcribing (full CoreML: encoder + decoder)...")
                 let startTime = CFAbsoluteTimeGetCurrent()
-                let result = try asrModel.transcribe(
+                let result = try await runtime.transcribe(
                     audio: audio, sampleRate: 16000, language: language)
                 let elapsed = CFAbsoluteTimeGetCurrent() - startTime
                 let rtf = elapsed / Double(duration)
@@ -606,18 +669,7 @@ public struct TranscribeCommand: ParsableCommand {
 
 /// Resolve shorthand model specifiers to HuggingFace model IDs.
 public func resolveASRModelId(_ specifier: String) -> String {
-    switch specifier.lowercased() {
-    case "0.6b", "small":
-        return ASRModelSize.small.defaultModelId
-    case "0.6b-8bit", "small-8bit":
-        return "aufklarer/Qwen3-ASR-0.6B-MLX-8bit"
-    case "1.7b", "large":
-        return ASRModelSize.large.defaultModelId
-    case "1.7b-4bit", "large-4bit":
-        return "aufklarer/Qwen3-ASR-1.7B-MLX-4bit"
-    default:
-        return specifier
-    }
+    Qwen3ASRDescriptors.resolveModelID(specifier)
 }
 
 /// Resolve Whisper model aliases to the CoreML repo layout used by WhisperASR.
@@ -718,5 +770,26 @@ public func resolveMossModelId(
         }
     default:
         throw ValidationError("[moss] --backend must be 'coreml' or 'mlx'")
+    }
+}
+
+/// Resolve published precision aliases, original checkpoints, and local bundles.
+func resolveKyutaiModelId(_ value: String) throws -> String {
+    switch value.lowercased() {
+    case "0.6b", "default", "1b", "1b-en-fr": return KyutaiSTTModel.defaultModelId
+    case "fp16": return KyutaiSTTVariant.fp16.modelId
+    case "int4", "4bit": return KyutaiSTTVariant.int4.modelId
+    case "int8", "8bit": return KyutaiSTTVariant.int8.modelId
+    case "upstream": return KyutaiSTTModel.upstreamModelId
+    case "2.6b", "2.6b-en": return KyutaiSTTModel.englishModelId
+    default:
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: value, isDirectory: &isDirectory), isDirectory.boolValue {
+            return value
+        }
+        if value.split(separator: "/").count == 2 && !value.hasPrefix(".") && !value.hasPrefix("/") {
+            return value
+        }
+        throw ValidationError("Kyutai --model must be 1b, fp16, int4, int8, upstream, 2.6b, a HuggingFace model ID, or an existing local export directory")
     }
 }

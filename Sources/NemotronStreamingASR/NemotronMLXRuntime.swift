@@ -2,6 +2,7 @@ import AudioCommon
 import Foundation
 import MLX
 import MLXNN
+import MLXCommon
 
 /// Native MLX runtime for Nemotron-3.5 Streaming ASR.
 ///
@@ -9,6 +10,8 @@ import MLXNN
 /// increments, so partial text arrives without reprocessing the recording.
 /// INT5 and INT8 use the same BF16 recurrent state and streaming geometry.
 public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public static let defaultModelId = NemotronMLXVariant.int5.modelId
     public static let inputSampleRate = 16_000
 
@@ -63,12 +66,17 @@ public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
         variant: NemotronMLXVariant = .int5,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> NemotronStreamingASRMLXModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let model = try await fromPretrained(
             modelId: variant.modelId,
             cacheDir: cacheDir,
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: progressHandler
         )
         guard model.quantizationBits == variant.quantizationBits else {
@@ -84,8 +92,12 @@ public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
         modelId: String,
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> NemotronStreamingASRMLXModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let directory: URL
         do {
             directory = try cacheDir
@@ -104,7 +116,8 @@ public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
                 modelId: modelId,
                 to: directory,
                 additionalFiles: downloadAdditionalFiles,
-                offlineMode: offlineMode
+                offlineMode: offlineMode,
+                downloadOptions: downloadOptions
             ) { fraction in
                 progressHandler?(
                     fraction * 0.75,
@@ -131,6 +144,9 @@ public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
         modelId: String = "local/Nemotron-3.5-Streaming-MLX",
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> NemotronStreamingASRMLXModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         for file in requiredBundleFiles where !FileManager.default.fileExists(
             atPath: directory.appendingPathComponent(file).path
         ) {
@@ -185,7 +201,7 @@ public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
         let weights = try MLX.loadArrays(
             url: directory.appendingPathComponent("model.safetensors")
         )
-        let network = NemotronMLXNetwork(configuration)
+        let network = withThrowawayRandomState { NemotronMLXNetwork(configuration) }
         do {
             try network.update(
                 parameters: ModuleParameters.unflattened(weights),
@@ -210,21 +226,41 @@ public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
         )
     }
 
+    /// Exact available experimental-guide locales, not a quality guarantee.
+    public var supportedLanguageGuideLanguages: [String] {
+        LanguageGuideContext.supportedLanguages(
+            vocabulary: vocabulary,
+            languages: languages,
+            promptCount: configuration.promptKernel.promptCount,
+            hasLanguageMask: true)
+    }
+
     public func createSession(
-        language: String? = nil
+        language: String? = nil,
+        languageGuide: LanguageGuideConfig? = nil
     ) throws -> NemotronMLXStreamingSession {
         inferenceLock.lock()
         defer { inferenceLock.unlock() }
+        let languageGuideMask = try LanguageGuideContext.makeMask(
+            config: languageGuide,
+            vocabulary: vocabulary,
+            languages: languages,
+            language: language,
+            hasLanguageMask: true,
+            promptCount: configuration.promptKernel.promptCount)
         return try NemotronMLXStreamingSession(
             model: self,
-            languageSlot: languages.slot(for: language)
+            languageSlot: languages.slot(for: language),
+            language: language,
+            languageGuideMask: languageGuideMask
         )
     }
 
     public func transcribeStream(
         audio: [Float],
         sampleRate: Int,
-        language: String? = nil
+        language: String? = nil,
+        languageGuide: LanguageGuideConfig? = nil
     ) -> AsyncStream<NemotronStreamingASRModel.PartialTranscript> {
         AsyncStream { continuation in
             Task {
@@ -237,7 +273,7 @@ public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
                             from: sampleRate,
                             to: Self.inputSampleRate
                         )
-                    let session = try self.createSession(language: language)
+                    let session = try self.createSession(language: language, languageGuide: languageGuide)
                     let chunkSamples =
                         self.configuration.streaming.melFrames
                         * Int(
@@ -270,7 +306,8 @@ public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
     public func transcribeAudio(
         _ audio: [Float],
         sampleRate: Int,
-        language: String? = nil
+        language: String? = nil,
+        languageGuide: LanguageGuideConfig? = nil
     ) throws -> String {
         let samples =
             sampleRate == Self.inputSampleRate
@@ -280,7 +317,7 @@ public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
                 from: sampleRate,
                 to: Self.inputSampleRate
             )
-        let session = try createSession(language: language)
+        let session = try createSession(language: language, languageGuide: languageGuide)
         var results = try session.pushAudio(samples)
         results.append(contentsOf: try session.finalize())
         return results.last?.text ?? ""
@@ -301,9 +338,18 @@ public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
     static let coreStreamingConfiguration = NemotronStreamingConfig.default
 }
 
+extension NemotronStreamingASRMLXModel: StreamingRecognitionModel {
+    public func makeStreamingSession(
+        language: String? = nil
+    ) throws -> any StreamingRecognitionSession {
+        try createSession(language: language)
+    }
+}
+
 public final class NemotronMLXStreamingSession {
     private let model: NemotronStreamingASRMLXModel
     private let configuration: NemotronMLXConfiguration
+    private let language: String?
     private let languageMask: MLXArray
     private let caches: [NemotronMLXLayerCache]
 
@@ -321,10 +367,13 @@ public final class NemotronMLXStreamingSession {
 
     init(
         model: NemotronStreamingASRMLXModel,
-        languageSlot: Int
+        languageSlot: Int,
+        language: String?,
+        languageGuideMask: [Float]?
     ) throws {
         self.model = model
         configuration = model.configuration
+        self.language = language
         guard
             (0..<configuration.promptKernel.promptCount)
                 .contains(languageSlot)
@@ -344,11 +393,17 @@ public final class NemotronMLXStreamingSession {
             ],
             dtype: .bfloat16
         )
-        var mask = [Float](
-            repeating: 0,
-            count: configuration.promptKernel.promptCount
-        )
-        mask[languageSlot] = 1
+        let mask: [Float]
+        if let languageGuideMask {
+            guard languageGuideMask.count == configuration.promptKernel.promptCount else {
+                throw LanguageGuideError.automaticLanguageUnavailable
+            }
+            mask = languageGuideMask
+        } else {
+            var oneHot = [Float](repeating: 0, count: configuration.promptKernel.promptCount)
+            oneHot[languageSlot] = 1
+            mask = oneHot
+        }
         languageMask = MLXArray(mask)
             .reshaped(1, configuration.promptKernel.promptCount)
             .asType(.bfloat16)
@@ -367,6 +422,10 @@ public final class NemotronMLXStreamingSession {
     public var frameDurationSeconds: Double {
         Double(configuration.encoder.subsamplingFactor)
             * configuration.preprocessor.windowStride
+    }
+
+    public var inputSampleRate: Int {
+        NemotronStreamingASRMLXModel.inputSampleRate
     }
 
     public func pushAudio(
@@ -560,5 +619,31 @@ public final class NemotronMLXStreamingSession {
             wordBoostingChangedDecisions: 0,
             words: words
         )
+    }
+}
+
+extension NemotronMLXStreamingSession: StreamingRecognitionSession {
+    public func push(_ chunk: CapturedAudioChunk) throws -> [StreamingRecognitionUpdate] {
+        guard chunk.sampleRate == inputSampleRate else {
+            throw StreamingRecognitionError.sampleRateMismatch(
+                expected: inputSampleRate, actual: chunk.sampleRate)
+        }
+        return try pushAudio(chunk.samples).map(unifiedUpdate)
+    }
+
+    public func finish() throws -> [StreamingRecognitionUpdate] {
+        try finalize().map(unifiedUpdate)
+    }
+
+    private func unifiedUpdate(
+        _ partial: NemotronStreamingASRModel.PartialTranscript
+    ) -> StreamingRecognitionUpdate {
+        StreamingRecognitionUpdate(
+            text: partial.text,
+            isFinal: partial.isFinal,
+            segmentIndex: partial.segmentIndex,
+            confidence: partial.confidence,
+            language: language,
+            words: partial.words)
     }
 }

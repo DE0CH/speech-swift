@@ -1,3 +1,5 @@
+import SpeechRuntime
+import Qwen3ASRRuntime
 import Foundation
 import Qwen3ASR
 import Qwen3TTS
@@ -9,6 +11,8 @@ import NemotronStreamingASR
 import OmnilingualASR
 import KokoroTTS
 import VoxCPM2TTS
+import VoxtralTTS
+import PocketTTS
 import IndicMioTTS
 import MagpieTTS
 import MagpieTTSCoreML
@@ -41,6 +45,17 @@ public struct ModelVariant: Sendable, Equatable {
     public let modelId: String
     public let aliases: [String]
     public let kind: Kind
+    public let descriptor: ModelDescriptor?
+
+    init(name: String, engine: String, modelId: String, aliases: [String], kind: Kind,
+         descriptor: ModelDescriptor? = nil) {
+        self.name = name
+        self.engine = engine
+        self.modelId = modelId
+        self.aliases = aliases
+        self.kind = kind
+        self.descriptor = descriptor
+    }
 
     public enum Kind: String, Sendable, Equatable, CaseIterable {
         /// Speech recognition (audio → text).
@@ -63,6 +78,8 @@ public struct ModelVariant: Sendable, Equatable {
         case separate
         /// Speech super-resolution (low-rate audio → high-rate audio).
         case sr
+        /// End-of-turn detection (audio → probability the speaker is done).
+        case turn
     }
 }
 
@@ -80,19 +97,19 @@ public let MODEL_REGISTRY: [ModelVariant] = [
     // ─── ASR ───────────────────────────────────────────────────────────────
     .init(name: "qwen3-asr-0.6b-mlx-int4",
           engine: "qwen3-asr",
-          modelId: Qwen3ASRModel.defaultModelId,
+          modelId: Qwen3ASRDescriptors.small.modelID,
           aliases: ["qwen3", "qwen3-asr", "qwen3-0.6b"],
-          kind: .asr),
+          kind: .asr, descriptor: Qwen3ASRDescriptors.small),
     .init(name: "qwen3-asr-1.7b-mlx-int8",
           engine: "qwen3-asr",
-          modelId: Qwen3ASRModel.largeModelId,
+          modelId: Qwen3ASRDescriptors.large.modelID,
           aliases: ["qwen3-1.7b", "qwen3-asr-1.7b"],
-          kind: .asr),
+          kind: .asr, descriptor: Qwen3ASRDescriptors.large),
     .init(name: "qwen3-asr-coreml",
           engine: "qwen3-asr",
-          modelId: Qwen3ASRModel.coreMLModelId,
+          modelId: Qwen3ASRDescriptors.coreML.modelID,
           aliases: ["qwen3-coreml", "qwen3-asr-0.6b-coreml"],
-          kind: .asr),
+          kind: .asr, descriptor: Qwen3ASRDescriptors.coreML),
     .init(name: "parakeet-tdt-v3-coreml-int8-30s",
           engine: "parakeet",
           modelId: ParakeetASRModel.defaultModelId,
@@ -128,6 +145,16 @@ public let MODEL_REGISTRY: [ModelVariant] = [
               "tts-1", "tts-1-hd", "gpt-4o-mini-tts",
               "gpt-4o-mini-tts-2025-12-15",
           ],
+          kind: .tts),
+    .init(name: "pocket-tts-100m-coreml-int8",
+          engine: "pocket-tts",
+          modelId: PocketTTSModel.defaultModelId,
+          aliases: ["pocket", "pocket-tts"],
+          kind: .tts),
+    .init(name: "voxtral-4b-tts-2603-mlx-4bit",
+          engine: "voxtral-tts",
+          modelId: VoxtralTTSModel.defaultModelId,
+          aliases: ["voxtral", "voxtral-tts", "voxtral-tts-4bit"],
           kind: .tts),
     .init(name: "cosyvoice-3-0.5b-mlx-bf16",
           engine: "cosyvoice",
@@ -289,6 +316,13 @@ public let MODEL_REGISTRY: [ModelVariant] = [
           modelId: FireRedVADModel.defaultModelId,
           aliases: ["firered", "firered-vad"],
           kind: .vad),
+
+    // ─── Turn detection ────────────────────────────────────────────────────
+    .init(name: "smart-turn-v3.2-coreml",
+          engine: "smart-turn",
+          modelId: SmartTurnModel.defaultModelId,
+          aliases: ["smart-turn", "smartturn", "turn"],
+          kind: .turn),
 
     // ─── Diarization ───────────────────────────────────────────────────────
     .init(name: "sortformer-diarization-coreml",

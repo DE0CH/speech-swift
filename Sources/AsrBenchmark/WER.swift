@@ -36,6 +36,9 @@ public enum WER {
         if m == 0 {
             return WERBreakdown(substitutions: 0, insertions: n, deletions: 0, referenceWords: 0)
         }
+        if n == 0 {
+            return WERBreakdown(substitutions: 0, insertions: 0, deletions: m, referenceWords: m)
+        }
 
         // dp[i][j] = edits to align ref[..i] with hyp[..j].
         // op[i][j] = which operation led there: 0 match/sub, 1 insertion (hyp), 2 deletion (ref).

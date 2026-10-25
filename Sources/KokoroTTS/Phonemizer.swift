@@ -7,6 +7,9 @@ import NaturalLanguage
 /// English: dictionary lookup → suffix stemming → CoreML BART G2P fallback.
 /// Chinese/Japanese/Italian: dedicated language-specific phonemizers.
 /// French/Spanish/Portuguese/Hindi: pronunciation dictionary + rule-based G2P.
+/// German: number/abbreviation normalization, `dict_de.json` (shipped with the
+/// German voice bundles), inflection/compound fallbacks and rule-based G2P in
+/// the espeak-ng convention the German voices were trained on.
 public final class KokoroPhonemizer {
 
     /// IPA symbol → token ID mapping (from vocab_index.json).
@@ -20,6 +23,11 @@ public final class KokoroPhonemizer {
 
     /// Silver dictionary (lower-confidence entries).
     private var silverDict: [String: DictEntry] = [:]
+
+    /// German pronunciation dictionary (`dict_de.json`), loaded with the
+    /// German voice bundles. Empty for the multilingual bundle, where the
+    /// German rules alone still produce German phonemes.
+    private var germanDict: [String: String] = [:]
 
     /// CoreML G2P encoder model.
     private var g2pEncoder: MLModel?
@@ -94,6 +102,49 @@ public final class KokoroPhonemizer {
         }
     }
 
+    /// Injects custom `word -> IPA` pronunciations into the gold dictionary.
+    ///
+    /// `resolveWord` consults `goldDict` before the silver dict, stemming, and the
+    /// neural `bartG2P` fallback, so entries added here take precedence over all
+    /// three. Proper nouns absent from the shipped dictionaries are otherwise
+    /// guessed from *English* spelling rules and come out badly wrong for
+    /// non-Anglo names. The function words in `specialCase` — the, a, an, to, of,
+    /// i — resolve earlier still and cannot be overridden this way.
+    ///
+    /// Keys are matched lowercased and must be single words: text is split on
+    /// whitespace and punctuation before resolution, so a key containing a space,
+    /// hyphen, or apostrophe is never looked up. Register the parts separately.
+    ///
+    /// IPA must use symbols present in the model vocabulary — unknown characters
+    /// are silently dropped by `tokenize`.
+    ///
+    /// English only. `tokenize` routes zh, ja, it, fr, es, pt, and hi to their
+    /// own phonemizers, none of which consult `goldDict`, so entries added here
+    /// are a no-op for those languages.
+    ///
+    /// Not synchronized: `tokenize` reads `goldDict` without a lock, so register
+    /// entries before synthesis starts running concurrently.
+    ///
+    /// Call this after `loadDictionaries(from:)`, which replaces the gold
+    /// dictionary wholesale and would discard entries added before it.
+    public func addPronunciations(_ entries: [String: String]) {
+        for (word, ipa) in entries {
+            goldDict[word.lowercased()] = .simple(ipa)
+        }
+    }
+
+    /// Load the German dictionary (`dict_de.json`, flat `{"word": "phonemes"}`)
+    /// when the bundle ships one.
+    public func loadGermanDictionary(from directory: URL) throws {
+        let url = directory.appendingPathComponent("dict_de.json")
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let data = try Data(contentsOf: url)
+        germanDict = try JSONDecoder().decode([String: String].self, from: data)
+    }
+
+    /// Number of entries in the loaded German dictionary.
+    public var germanDictionarySize: Int { germanDict.count }
+
     /// Load separate G2P encoder + decoder CoreML models.
     public func loadG2PModels(encoderURL: URL, decoderURL: URL, vocabURL: URL) throws {
         let config = MLModelConfiguration()
@@ -136,6 +187,7 @@ public final class KokoroPhonemizer {
     private lazy var spanishPhonemizer = LatinPhonemizer(language: .spanish)
     private lazy var portuguesePhonemizer = LatinPhonemizer(language: .portuguese)
     private lazy var italianPhonemizer = LatinPhonemizer(language: .italian)
+    private lazy var germanPhonemizer = GermanPhonemizer()
 
     // MARK: - Tokenization
 
@@ -157,6 +209,8 @@ public final class KokoroPhonemizer {
             phonemes = phonemizeWithDict(text, dict: PronunciationDicts.pt, fallback: portuguesePhonemizer)
         case "hi", "hindi":
             phonemes = phonemizeWithDict(text, dict: PronunciationDicts.hi, fallback: hindiPhonemizer)
+        case "de", "deu", "german":
+            phonemes = germanPhonemizer.phonemize(text, dictionary: germanDict)
         default:
             phonemes = textToPhonemes(text)
         }

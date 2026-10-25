@@ -55,6 +55,8 @@ public struct MAGNeTGenerationParams: Sendable {
 // MARK: - Main entry point
 
 public final class MAGNeTMusicGen {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public let config: MAGNeTConfig
     public let encodecConfig: EncodecModelConfig
     public let t5Config: T5ModelConfig
@@ -91,10 +93,14 @@ public final class MAGNeTMusicGen {
 
     public static func fromPretrained(
         variant: MAGNeTVariant,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> MAGNeTMusicGen {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let paths = try await MAGNeTDownloader.ensureDownloaded(
-            variant: variant, progressHandler: progressHandler)
+            variant: variant, downloadOptions: downloadOptions, progressHandler: progressHandler)
 
         // MAGNeT bundle.
         let cfg = try MAGNeTConfig.load(from: paths.bundleDir.appendingPathComponent("config.json"))
@@ -110,17 +116,19 @@ public final class MAGNeTMusicGen {
         let encWeights = try loadSafetensors(paths.encodecDir.appendingPathComponent("model.safetensors"))
 
         // Build modules.
-        let lm = MAGNeTLM(config: cfg)
+        let lm = withThrowawayRandomState { MAGNeTLM(config: cfg) }
         var lmStripped: [String: MLXArray] = [:]
         for (k, v) in bundleWeights where k.hasPrefix("lm.") {
             lmStripped[String(k.dropFirst("lm.".count))] = v
         }
         try lm.loadWeights(lmStripped)
 
-        let t5 = T5Encoder(config: t5Cfg)
+        let t5 = withThrowawayRandomState { T5Encoder(config: t5Cfg) }
         try t5.loadSanitizedWeights(t5Weights)
 
-        let encodec = EncodecModelMLX(config: encCfg, numQuantizers: cfg.nQ)
+        let encodec = withThrowawayRandomState {
+            EncodecModelMLX(config: encCfg, numQuantizers: cfg.nQ)
+        }
         try loadFlatWeights(into: encodec, mapping: encWeights)
 
         // text_conditioner.output_proj

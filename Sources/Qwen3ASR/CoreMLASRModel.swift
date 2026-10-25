@@ -42,6 +42,7 @@ public class CoreMLASRModel {
         decoderComputeUnits: MLComputeUnits = CoreMLComputeUnitsResolver.resolved(default: .cpuAndNeuralEngine),
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> CoreMLASRModel {
         // Download encoder (0-30%)
@@ -50,7 +51,8 @@ public class CoreMLASRModel {
             modelId: encoderModelId,
             computeUnits: encoderComputeUnits,
             cacheDir: cacheDir,
-            offlineMode: offlineMode
+            offlineMode: offlineMode,
+            downloadOptions: downloadOptions
         ) { p, msg in
             progressHandler?(p * 0.3, msg)
         }
@@ -61,7 +63,8 @@ public class CoreMLASRModel {
             modelId: decoderModelId,
             computeUnits: decoderComputeUnits,
             cacheDir: cacheDir,
-            offlineMode: offlineMode
+            offlineMode: offlineMode,
+            downloadOptions: downloadOptions
         ) { p, msg in
             progressHandler?(0.3 + p * 0.5, msg)
         }
@@ -73,7 +76,8 @@ public class CoreMLASRModel {
             modelId: tokenizerModelId,
             to: tokenizerDir,
             additionalFiles: ["vocab.json", "merges.txt", "tokenizer_config.json"],
-            offlineMode: offlineMode
+            offlineMode: offlineMode,
+            downloadOptions: downloadOptions
         )
 
         let model = CoreMLASRModel(encoder: enc, decoder: dec)
@@ -97,13 +101,17 @@ public class CoreMLASRModel {
 
     /// Transcribe audio to text using full CoreML pipeline.
     ///
-    /// The entire inference runs on CoreML (Neural Engine + CPU) without MLX GPU.
+    /// The three model dispatches all run on CoreML (Neural Engine + CPU),
+    /// but this path is **not** MLX-free: mel extraction and the encoder
+    /// output both round-trip through MLXArray, which evaluates on Metal.
+    /// For background execution use `transcribeWithoutMLX()`.
     public func transcribe(
         audio: [Float],
         sampleRate: Int = 16000,
         language: String? = nil,
         maxTokens: Int = 448
     ) throws -> String {
+        try Task.checkCancellation()
         let profile = ProcessInfo.processInfo.environment["COREML_ASR_PROFILE"] == "1"
         let t0 = CFAbsoluteTimeGetCurrent()
 
@@ -154,6 +162,7 @@ public class CoreMLASRModel {
         let chunk = decoder.prefillBatchSize
         var consumed = 0
         while consumed < numAudioTokens {
+            try Task.checkCancellation()
             let n = min(chunk, numAudioTokens - consumed)
             lastLogits = try decoder.decoderPrefill(
                 flatEmbeddings: audioEmbedsFlat,
@@ -198,6 +207,7 @@ public class CoreMLASRModel {
         generatedTokens.append(nextToken)
 
         for _ in 1..<maxTokens {
+            try Task.checkCancellation()
             if nextToken == imEndId { break }
             let embedding = try decoder.embed(tokenId: nextToken)
             logits = try decoder.decoderStep(embedding: embedding)
@@ -238,10 +248,12 @@ public class CoreMLASRModel {
     ///
     /// Uses `featureExtractor.processRaw()` (CPU via Accelerate) and
     /// `encoder.encode(melData:melBins:timeFrames:)` (CoreML) to produce
-    /// MLMultiArray embeddings, then decodes using `audioEmbeddingFromMultiArray()`.
+    /// MLMultiArray embeddings, then bulk-extracts them via
+    /// `audioEmbeddingsToFloatArray()` and prefills in batched chunks.
     ///
-    /// This method is safe for iOS background execution where Metal GPU eval
-    /// (triggered by MLXArray operations) would cause a crash.
+    /// This is the only path with no MLXArray operations anywhere, so it is
+    /// the one that is safe for iOS background execution — `transcribe()`
+    /// still round-trips through MLX for mel extraction and encoder output.
     ///
     /// - Note: Requires `processRaw()` on WhisperFeatureExtractor and
     ///   `encode(melData:melBins:timeFrames:)` on CoreMLASREncoder, both added by T2.
@@ -251,6 +263,7 @@ public class CoreMLASRModel {
         language: String? = nil,
         maxTokens: Int = 448
     ) throws -> String {
+        try Task.checkCancellation()
         // 1. Extract mel features (pure CPU via Accelerate — no MLXArray)
         let melFeatures = featureExtractor.processRaw(audio, sampleRate: sampleRate)
 
@@ -286,25 +299,33 @@ public class CoreMLASRModel {
         }
         suffixTokens.append(Int32(T.asrTextTokenId))
 
-        // 5. Prefill: process all prefix tokens
+        // 5. Prefill: prefix tokens (one batched ANE dispatch per chunk)
         var lastLogits: MLMultiArray?
+        lastLogits = try decoder.decoderPrefillTokens(prefixTokens)
 
-        for token in prefixTokens {
-            let embedding = try decoder.embed(tokenId: token)
-            lastLogits = try decoder.decoderStep(embedding: embedding)
+        // 6. Prefill: audio embeddings. Bulk-extract once — dtype- and
+        // stride-aware, no MLX — then feed the decoder in batched chunks,
+        // exactly as `transcribe()` does. The previous per-token loop cost
+        // one fixed-T ANE dispatch per audio token (~300 for a 24 s clip)
+        // and read the Float16 encoder output as Float32, which both
+        // corrupted the embeddings and ran off the end of the buffer past
+        // token 194.
+        let audioEmbedsFlat = try decoder.audioEmbeddingsToFloatArray(
+            audioEmbeds, count: numAudioTokens)
+        let chunk = decoder.prefillBatchSize
+        var consumed = 0
+        while consumed < numAudioTokens {
+            let n = min(chunk, numAudioTokens - consumed)
+            lastLogits = try decoder.decoderPrefill(
+                flatEmbeddings: audioEmbedsFlat,
+                offset: consumed,
+                realCount: n,
+            )
+            consumed += n
         }
 
-        // 6. Prefill: process audio embeddings (MLX-free path)
-        for i in 0..<numAudioTokens {
-            let audioEmbed = try decoder.audioEmbeddingFromMultiArray(audioEmbeds, at: i)
-            lastLogits = try decoder.decoderStep(embedding: audioEmbed)
-        }
-
-        // Prefill: process suffix tokens
-        for token in suffixTokens {
-            let embedding = try decoder.embed(tokenId: token)
-            lastLogits = try decoder.decoderStep(embedding: embedding)
-        }
+        // Prefill: suffix tokens
+        lastLogits = try decoder.decoderPrefillTokens(suffixTokens)
 
         // 7. Autoregressive generation (same EOS note as `transcribe()` —
         // see that path for the background).
@@ -321,6 +342,7 @@ public class CoreMLASRModel {
         generatedTokens.append(nextToken)
 
         for _ in 1..<maxTokens {
+            try Task.checkCancellation()
             if nextToken == imEndId { break }
             let embedding = try decoder.embed(tokenId: nextToken)
             logits = try decoder.decoderStep(embedding: embedding)

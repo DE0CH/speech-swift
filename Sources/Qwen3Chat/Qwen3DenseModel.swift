@@ -81,10 +81,10 @@ public final class Qwen3DenseAttention: Module {
         scale = 1.0 / sqrt(Float(c.headDim))
         let gs = c.quantGroupSize, bits = c.quantBits
         let qDim = numQHeads * headDim, kvDim = numKVHeads * headDim
-        _qProj = ModuleInfo(wrappedValue: QuantizedLinear(c.hiddenSize, qDim, bias: false, groupSize: gs, bits: bits))
-        _kProj = ModuleInfo(wrappedValue: QuantizedLinear(c.hiddenSize, kvDim, bias: false, groupSize: gs, bits: bits))
-        _vProj = ModuleInfo(wrappedValue: QuantizedLinear(c.hiddenSize, kvDim, bias: false, groupSize: gs, bits: bits))
-        _oProj = ModuleInfo(wrappedValue: QuantizedLinear(qDim, c.hiddenSize, bias: false, groupSize: gs, bits: bits))
+        _qProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(c.hiddenSize, qDim, bias: false, groupSize: gs, bits: bits))
+        _kProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(c.hiddenSize, kvDim, bias: false, groupSize: gs, bits: bits))
+        _vProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(c.hiddenSize, kvDim, bias: false, groupSize: gs, bits: bits))
+        _oProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(qDim, c.hiddenSize, bias: false, groupSize: gs, bits: bits))
         _qNorm = ModuleInfo(wrappedValue: RMSNorm(dimensions: headDim, eps: c.rmsNormEps))
         _kNorm = ModuleInfo(wrappedValue: RMSNorm(dimensions: headDim, eps: c.rmsNormEps))
         rope = RoPE(dimensions: headDim, traditional: false, base: c.ropeTheta)
@@ -139,9 +139,9 @@ public final class Qwen3DenseMLP: Module {
 
     public init(_ c: Qwen3DenseConfig) {
         let h = c.hiddenSize, i = c.intermediateSize, gs = c.quantGroupSize, bits = c.quantBits
-        _gateProj = ModuleInfo(wrappedValue: QuantizedLinear(h, i, bias: false, groupSize: gs, bits: bits))
-        _upProj = ModuleInfo(wrappedValue: QuantizedLinear(h, i, bias: false, groupSize: gs, bits: bits))
-        _downProj = ModuleInfo(wrappedValue: QuantizedLinear(i, h, bias: false, groupSize: gs, bits: bits))
+        _gateProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(h, i, bias: false, groupSize: gs, bits: bits))
+        _upProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(h, i, bias: false, groupSize: gs, bits: bits))
+        _downProj = ModuleInfo(wrappedValue: QuantizedLinear.preQuantized(i, h, bias: false, groupSize: gs, bits: bits))
         super.init()
     }
 
@@ -194,7 +194,7 @@ public final class Qwen3DenseModel: Module {
         _layers = ModuleInfo(wrappedValue: (0..<c.numHiddenLayers).map { _ in Qwen3DenseLayer(c) })
         _norm = ModuleInfo(wrappedValue: RMSNorm(dimensions: c.hiddenSize, eps: c.rmsNormEps))
         _lmHead = ModuleInfo(wrappedValue: c.tieWordEmbeddings ? nil
-            : QuantizedLinear(c.hiddenSize, c.vocabSize, bias: false, groupSize: c.quantGroupSize, bits: c.quantBits))
+            : QuantizedLinear.preQuantized(c.hiddenSize, c.vocabSize, bias: false, groupSize: c.quantGroupSize, bits: c.quantBits))
         super.init()
     }
 

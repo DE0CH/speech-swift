@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import MLX
 
 @main
 struct AsrBench: AsyncParsableCommand {
@@ -31,6 +32,15 @@ struct AsrBench: AsyncParsableCommand {
     @Flag(name: .long, help: "Print reference/hypothesis pairs for utterances with WER errors.")
     var printErrors: Bool = false
 
+    @Option(name: .long, help: "Limit MLX's shared free-buffer cache in MiB for this benchmark (0 disables caching).")
+    var mlxCacheLimitMB: Int?
+
+    mutating func validate() throws {
+        if let limit = mlxCacheLimitMB, !(0...(Int.max / (1024 * 1024))).contains(limit) {
+            throw ValidationError("--mlx-cache-limit-mb must be nonnegative and fit in bytes")
+        }
+    }
+
     mutating func run() async throws {
         // stdout is block-buffered when the process runs with redirected
         // output (background tasks, tee, etc.); progress lines get lost if
@@ -40,6 +50,10 @@ struct AsrBench: AsyncParsableCommand {
         if isolated && engines.count > 1 {
             try await runIsolated()
             return
+        }
+        if let limit = mlxCacheLimitMB {
+            Memory.cacheLimit = limit * 1024 * 1024
+            print("MLX free-buffer cache limit: \(limit) MiB")
         }
 
         let datasetURL = URL(fileURLWithPath: dataset)
@@ -80,12 +94,12 @@ struct AsrBench: AsyncParsableCommand {
         for engine in engineImpls {
             print("=== \(engine.name) ===")
             let preLoadMemory = currentProcessMemoryUsage()
-            var peakRSS = preLoadMemory.residentBytes
+            var peakRSS = preLoadMemory.peakResidentBytes
             var peakPhysicalFootprint = preLoadMemory.peakPhysicalFootprintBytes
             do {
                 try await engine.load(warmupAudio: warmup, sampleRate: 16000)
                 let loadedMemory = currentProcessMemoryUsage()
-                peakRSS = max(peakRSS, loadedMemory.residentBytes)
+                peakRSS = max(peakRSS, loadedMemory.peakResidentBytes)
                 peakPhysicalFootprint = max(
                     peakPhysicalFootprint,
                     loadedMemory.peakPhysicalFootprintBytes)
@@ -104,6 +118,7 @@ struct AsrBench: AsyncParsableCommand {
             var perFileWERs: [Double] = []
             var perFileCERs: [Double] = []
             var rtfs: [Double] = []
+            var utteranceResults: [UtteranceResult] = []
             var totalElapsed = 0.0
             var processedAudioSec = 0.0
             for (idx, item) in decoded.enumerated() {
@@ -113,6 +128,14 @@ struct AsrBench: AsyncParsableCommand {
                     let ref = Normalizer.normalize(item.utt.reference)
                     let b = WER.compute(reference: ref, hypothesis: hyp)
                     let c = CER.compute(reference: ref, hypothesis: hyp)
+                    utteranceResults.append(UtteranceResult(
+                        id: item.utt.id, reference: item.utt.reference, hypothesis: text,
+                        audioSeconds: t.audioDuration, elapsedSeconds: t.elapsed,
+                        werPercent: b.wer * 100, firstTokenSeconds: t.firstTokenSeconds,
+                        firstTokenAudioSeconds: t.firstTokenAudioSeconds,
+                        frameLatencyP50Seconds: t.frameLatencyP50Seconds,
+                        frameLatencyP95Seconds: t.frameLatencyP95Seconds,
+                        flushSeconds: t.flushSeconds))
                     if printErrors && b.totalErrors > 0 {
                         print(String(format: "  %@ WER=%.2f%% S/I/D=%d/%d/%d",
                                      item.utt.id as NSString,
@@ -139,7 +162,7 @@ struct AsrBench: AsyncParsableCommand {
                     // miss, and sampling every utterance avoids missing a short
                     // peak between progress updates.
                     let memory = currentProcessMemoryUsage()
-                    peakRSS = max(peakRSS, memory.residentBytes)
+                    peakRSS = max(peakRSS, memory.peakResidentBytes)
                     peakPhysicalFootprint = max(
                         peakPhysicalFootprint,
                         memory.peakPhysicalFootprintBytes)
@@ -194,7 +217,8 @@ struct AsrBench: AsyncParsableCommand {
                 throughputXRT: throughputMeanXRT,
                 throughputMeanXRT: throughputMeanXRT,
                 throughputMedianXRT: throughputMedianXRT,
-                throughputOverallXRT: throughputOverallXRT
+                throughputOverallXRT: throughputOverallXRT,
+                utteranceResults: utteranceResults
             ))
         }
 
@@ -202,7 +226,8 @@ struct AsrBench: AsyncParsableCommand {
             machine: ProcessInfo.processInfo.hostName,
             datasetPath: dataset,
             utterances: decoded.count,
-            results: results
+            results: results,
+            mlxCacheLimitMB: mlxCacheLimitMB
         )
 
         print("\n" + ReportPrinter.table(report))
@@ -230,6 +255,8 @@ struct AsrBench: AsyncParsableCommand {
             ]
             if let limit { args += ["--limit", "\(limit)"] }
             if let language { args += ["--language", language] }
+            if printErrors { args += ["--print-errors"] }
+            if let mlxCacheLimitMB { args += ["--mlx-cache-limit-mb", "\(mlxCacheLimitMB)"] }
 
             print("\n──── isolated subrun: \(engineName) ────")
             let proc = Process()
@@ -262,7 +289,8 @@ struct AsrBench: AsyncParsableCommand {
             machine: ProcessInfo.processInfo.hostName,
             datasetPath: dataset,
             utterances: uttCount,
-            results: merged
+            results: merged,
+            mlxCacheLimitMB: mlxCacheLimitMB
         )
 
         print("\n" + ReportPrinter.table(report))

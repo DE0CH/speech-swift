@@ -3,6 +3,8 @@ import Hummingbird
 import HummingbirdCore
 import NIOCore
 import KokoroTTS
+import VoxtralTTS
+import PocketTTS
 
 // MARK: - OpenAI-compatible /v1/audio/speech
 
@@ -20,6 +22,7 @@ struct OpenAISpeechRequest: Equatable, Sendable {
     let responseFormat: OpenAISpeechResponseFormat
     let speed: Float
     let language: String
+    let stream: Bool
 
     private struct Payload: Decodable {
         let model: String?
@@ -28,6 +31,7 @@ struct OpenAISpeechRequest: Equatable, Sendable {
         let responseFormat: String?
         let speed: Float?
         let language: String?
+        let stream: Bool?
 
         enum CodingKeys: String, CodingKey {
             case model
@@ -36,6 +40,7 @@ struct OpenAISpeechRequest: Equatable, Sendable {
             case responseFormat = "response_format"
             case speed
             case language
+            case stream
         }
     }
 
@@ -70,6 +75,9 @@ struct OpenAISpeechRequest: Equatable, Sendable {
         guard let responseFormat = OpenAISpeechResponseFormat(rawValue: formatName) else {
             throw OpenAISpeechRequestError.unsupportedResponseFormat(formatName)
         }
+        if payload.stream == true && responseFormat != .pcm {
+            throw OpenAISpeechRequestError.streamingRequiresPCM
+        }
 
         let speed = payload.speed ?? 1.0
         guard speed >= 0.25, speed <= 4.0 else {
@@ -85,7 +93,8 @@ struct OpenAISpeechRequest: Equatable, Sendable {
             voice: voice,
             responseFormat: responseFormat,
             speed: speed,
-            language: resolvedLanguage)
+            language: resolvedLanguage,
+            stream: payload.stream ?? false)
     }
 }
 
@@ -95,6 +104,7 @@ enum OpenAISpeechRequestError: LocalizedError, Equatable {
     case inputTooLong(Int)
     case unsupportedResponseFormat(String)
     case speedOutOfRange(Float)
+    case streamingRequiresPCM
 
     var errorDescription: String? {
         switch self {
@@ -108,6 +118,8 @@ enum OpenAISpeechRequestError: LocalizedError, Equatable {
             "Unsupported response format '\(format)'; use 'wav' or 'pcm'"
         case .speedOutOfRange(let speed):
             "Speed \(speed) is outside the supported range 0.25...4.0"
+        case .streamingRequiresPCM:
+            "Streaming requires response_format 'pcm'"
         }
     }
 }
@@ -148,6 +160,54 @@ func handleOpenAISpeech(
         speechRequest.voice,
         engine: variant.engine)
 
+    if speechRequest.stream {
+        if variant.engine == "pocket-tts" {
+            do {
+                try PocketTTSModel.validateInput(text: speechRequest.input, language: speechRequest.language, voice: voice ?? "alba")
+                let permit = try await state.inferenceGate.acquire()
+                do {
+                    let model = try await state.loadPocketTTS(modelId: variant.modelId)
+                    return Response(status: .ok, headers: [.contentType: "audio/pcm"], body: .init { writer in
+                        defer { permit.release() }
+                        try await model.generateStreaming(text: speechRequest.input, language: speechRequest.language) { chunk in
+                            if !chunk.samples.isEmpty {
+                                try await writer.write(ByteBuffer(data: floatToPCM16LE(chunk.samples)))
+                            }
+                        }
+                        try await writer.finish(nil)
+                    })
+                } catch { permit.release(); throw error }
+            } catch {
+                return openAIErrorResponse("Speech synthesis failed: \(inferenceErrorDescription(error))",
+                                           status: inferenceErrorStatus(error))
+            }
+        }
+        guard variant.engine == "voxtral-tts" else {
+            return openAIErrorResponse("Streaming speech is currently supported for Pocket and Voxtral TTS models",
+                                       status: .badRequest)
+        }
+        do {
+            let preset = try validatedVoxtralVoice(voice, language: speechRequest.language)
+            let text = try VoxtralTTSTokenizer.normalizedText(speechRequest.input)
+            let permit = try await state.inferenceGate.acquire()
+            do {
+                let model = try await state.loadVoxtralTTS(modelId: variant.modelId)
+                return Response(status: .ok, headers: [.contentType: "audio/pcm"], body: .init { writer in
+                    defer { permit.release() }
+                    try await model.generateStreaming(text: text, voice: preset) { chunk in
+                        if !chunk.samples.isEmpty {
+                            try await writer.write(ByteBuffer(data: floatToPCM16LE(chunk.samples)))
+                        }
+                    }
+                    try await writer.finish(nil)
+                })
+            } catch { permit.release(); throw error }
+        } catch {
+            return openAIErrorResponse("Speech synthesis failed: \(inferenceErrorDescription(error))",
+                                       status: inferenceErrorStatus(error))
+        }
+    }
+
     let samples: [Float]
     do {
         samples = try await dispatchSynthesize(
@@ -159,8 +219,8 @@ func handleOpenAISpeech(
             speed: speechRequest.speed)
     } catch {
         return openAIErrorResponse(
-            "Speech synthesis failed: \(error.localizedDescription)",
-            status: .internalServerError)
+            "Speech synthesis failed: \(inferenceErrorDescription(error))",
+            status: inferenceErrorStatus(error))
     }
 
     do {
@@ -199,7 +259,7 @@ func resolvedLocalVoice(_ voice: String, engine: String) -> String? {
         return engine == "kokoro" ? KokoroTTSModel.defaultVoice : nil
     }
     switch engine {
-    case "kokoro", "qwen3-tts":
+    case "kokoro", "qwen3-tts", "voxtral-tts", "pocket-tts":
         return voice
     default:
         return nil

@@ -35,14 +35,23 @@ struct TDTGreedyDecoder {
     let config: ParakeetConfig
     let decoder: MLModel
     let joint: MLModel
+    /// Vocabulary-owned classification of transcript text versus model-control tokens.
+    let vocabulary: ParakeetVocabulary
     /// Language-tag token IDs to suppress during argmax, so the decoder can only emit an allowed
     /// language and the transcription follows it. Empty = no steering (native auto-detect).
     let maskedTokenIds: Set<Int>
 
-    init(config: ParakeetConfig, decoder: MLModel, joint: MLModel, maskedTokenIds: Set<Int> = []) {
+    init(
+        config: ParakeetConfig,
+        decoder: MLModel,
+        joint: MLModel,
+        vocabulary: ParakeetVocabulary,
+        maskedTokenIds: Set<Int> = []
+    ) {
         self.config = config
         self.decoder = decoder
         self.joint = joint
+        self.vocabulary = vocabulary
         self.maskedTokenIds = maskedTokenIds
     }
 
@@ -51,10 +60,12 @@ struct TDTGreedyDecoder {
     /// - Parameters:
     ///   - encoded: Encoder output as MLMultiArray, shape `[1, T, encoderHidden]`
     ///   - encodedLength: Number of valid encoder frames
-    /// - Returns: Tuple of (token IDs, per-token log-probs, overall confidence 0.0–1.0)
-    func decode(encoded: MLMultiArray, encodedLength: Int) throws -> (tokens: [Int], tokenLogProbs: [Float], confidence: Float) {
+    /// - Returns: Tuple of (token IDs, per-token log-probs, per-token encoder frame index,
+    ///   overall confidence 0.0–1.0). Frame indices are relative to `encoded`.
+    func decode(encoded: MLMultiArray, encodedLength: Int) throws -> (tokens: [Int], tokenLogProbs: [Float], tokenFrames: [Int], confidence: Float) {
         var tokens = [Int]()
         var tokenLogProbs = [Float]()
+        var tokenFrames = [Int]()
 
         // Initialize LSTM state
         let hShape = [config.decoderLayers, 1, config.decoderHidden] as [NSNumber]
@@ -91,11 +102,6 @@ struct TDTGreedyDecoder {
         decoderProvider.update("h", hState)
         decoderProvider.update("c", cState)
 
-        // Special tokens (0..273) are filtered from output — they include
-        // language tags, speaker tags, control tokens from SentencePiece training.
-        // Text tokens start at index 274.
-        let firstTextTokenId = 274
-
         var t = 0
         while t < encodedLength {
             // Extract encoder frame at position t (mutates encSlice data in-place)
@@ -112,11 +118,15 @@ struct TDTGreedyDecoder {
             if tokenId == config.blankTokenId {
                 t += 1
             } else {
-                if tokenId >= firstTextTokenId {
+                // Keep model-control emissions out of the transcript, but still feed them into
+                // the decoder state below. Token ordering is not a valid classifier: plain digit
+                // tokens 0...9 occupy IDs 234...243 between special-token ranges.
+                if vocabulary.isTextToken(tokenId) {
                     tokens.append(tokenId)
                     // Compute log-softmax: log_prob = logit[id] - log(sum(exp(logits)))
                     let logProb = logSoftmax(tokenLogits, tokenId: tokenId, count: config.vocabSize + 1, floatBuf: argmaxBuf)
                     tokenLogProbs.append(logProb)
+                    tokenFrames.append(t)
                 }
 
                 let durationIdx = argmax(durationLogits, count: config.numDurationBins, floatBuf: nil)
@@ -145,7 +155,7 @@ struct TDTGreedyDecoder {
         } else {
             confidence = 0.0
         }
-        return (tokens, tokenLogProbs, confidence)
+        return (tokens, tokenLogProbs, tokenFrames, confidence)
     }
 
     // MARK: - Array Operations

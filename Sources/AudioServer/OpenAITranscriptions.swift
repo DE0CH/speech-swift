@@ -21,7 +21,7 @@ import AudioCommon
 /// without code changes.
 func handleOpenAITranscriptions(
     request: Request,
-    state: ModelState
+    state: any RealtimeModelLoading
 ) async throws -> Response {
     let body = try await request.body.collect(upTo: 50 * 1024 * 1024)
     let contentType = request.headers[.contentType] ?? ""
@@ -89,10 +89,12 @@ func handleOpenAITranscriptions(
         text = try await dispatchTranscribe(
             audio: audio, sampleRate: sampleRate,
             variant: variant, language: language, state: state)
+    } catch is CancellationError {
+        throw CancellationError()
     } catch {
         return openAIErrorResponse(
-            "Transcription failed: \(error.localizedDescription)",
-            status: .internalServerError)
+            "Transcription failed: \(inferenceErrorDescription(error))",
+            status: inferenceErrorStatus(error))
     }
     let duration = Double(audio.count) / Double(sampleRate)
     let durationRounded = round(duration * 100) / 100

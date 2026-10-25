@@ -1,6 +1,7 @@
 import Foundation
 import MLX
 import MLXNN
+import MLXCommon
 import PersonaPlex
 
 // MARK: - Mimi codec loading (32 codebooks for CSM)
@@ -12,7 +13,7 @@ import PersonaPlex
 public enum CSMMimi {
     public static func load(from file: URL, numCodebooks: Int = 32) throws -> Mimi {
         let cfg = MimiConfig.moshiko(numCodebooks: numCodebooks)
-        let model = Mimi(cfg: cfg)
+        let model = withThrowawayRandomState { Mimi(cfg: cfg) }
         var weights = try MLX.loadArrays(url: file)
         weights = model.sanitize(weights: weights)
         try model.update(parameters: ModuleParameters.unflattened(weights), verify: .all)

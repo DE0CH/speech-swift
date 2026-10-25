@@ -59,6 +59,8 @@ public enum ForcedAlignerVariant: String, CaseIterable, Sendable {
 /// vocab lm_head with a 5000-class timestamp classification head.
 /// Inference is non-autoregressive (single forward pass).
 public class Qwen3ForcedAligner {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public let audioEncoder: Qwen3AudioEncoder
     public let textDecoder: any ForcedAlignerTextDecoding
     public let classifyHead: Linear
@@ -451,8 +453,12 @@ public extension Qwen3ForcedAligner {
         modelId: String = "aufklarer/Qwen3-ForcedAligner-0.6B-4bit",
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> Qwen3ForcedAligner {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         progressHandler?(0.0, "Downloading model...")
 
         let cacheDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
@@ -464,6 +470,7 @@ public extension Qwen3ForcedAligner {
             additionalFiles: ["vocab.json", "merges.txt", "tokenizer_config.json",
                               "quantize_config.json"],
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { progress in
                 progressHandler?(progress * 0.8, "Downloading weights...")
             }
@@ -482,11 +489,13 @@ public extension Qwen3ForcedAligner {
             variant = .mlx4bit
         }
 
-        let model = Qwen3ForcedAligner(
-            audioConfig: .forcedAligner,
-            textConfig: variant.textConfig,
-            useFloatTextDecoder: variant.usesFloatTextDecoder
-        )
+        let model = withThrowawayRandomState {
+            Qwen3ForcedAligner(
+                audioConfig: .forcedAligner,
+                textConfig: variant.textConfig,
+                useFloatTextDecoder: variant.usesFloatTextDecoder
+            )
+        }
 
         // Load tokenizer
         let vocabPath = cacheDir.appendingPathComponent("vocab.json")

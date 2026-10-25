@@ -4,6 +4,11 @@ import Foundation
 public struct Timings: Sendable {
     public var elapsed: Double       // synthesis time in seconds
     public var audioDuration: Double // input audio duration in seconds
+    public var firstTokenSeconds: Double? = nil
+    public var firstTokenAudioSeconds: Double? = nil
+    public var frameLatencyP50Seconds: Double? = nil
+    public var frameLatencyP95Seconds: Double? = nil
+    public var flushSeconds: Double? = nil
 
     public var rtf: Double { elapsed / max(audioDuration, 1e-6) }
 }
@@ -33,6 +38,9 @@ public protocol BenchEngine: AnyObject, Sendable {
 }
 
 public enum EngineID: String, CaseIterable, Sendable {
+    case kyutaiMLXFP16 = "kyutai-stt-mlx-fp16"
+    case kyutaiMLXInt4 = "kyutai-stt-mlx-int4"
+    case kyutaiMLXInt8 = "kyutai-stt-mlx-int8"
     case cohereMLXFP16 = "cohere-transcribe-mlx-fp16"
     case cohereMLXInt5 = "cohere-transcribe-mlx-int5"
     case cohereMLXInt8 = "cohere-transcribe-mlx-int8"
@@ -66,6 +74,9 @@ public enum EngineID: String, CaseIterable, Sendable {
 
     public func make() -> BenchEngine {
         switch self {
+        case .kyutaiMLXFP16: return KyutaiSTTEngine(variant: .fp16)
+        case .kyutaiMLXInt4: return KyutaiSTTEngine(variant: .int4)
+        case .kyutaiMLXInt8: return KyutaiSTTEngine(variant: .int8)
         case .cohereMLXFP16: return CohereTranscribeMLXEngine(variant: .fp16)
         case .cohereMLXInt5: return CohereTranscribeMLXEngine(variant: .int5)
         case .cohereMLXInt8: return CohereTranscribeMLXEngine(variant: .int8)

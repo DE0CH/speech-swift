@@ -2,6 +2,7 @@ import Foundation
 import MLX
 import MLXFast
 import MLXNN
+import MLXCommon
 
 private func nemotronQuantizedLinear(
     _ inputDimensions: Int,
@@ -9,13 +10,12 @@ private func nemotronQuantizedLinear(
     bias: Bool = true,
     quantization: NemotronMLXQuantization
 ) -> Linear {
-    QuantizedLinear(
+    QuantizedLinear.preQuantized(
         inputDimensions,
         outputDimensions,
         bias: bias,
         groupSize: quantization.groupSize,
-        bits: quantization.bits,
-        mode: .affine
+        bits: quantization.bits
     )
 }
 

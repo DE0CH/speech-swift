@@ -1,5 +1,21 @@
 import Foundation
 
+public struct UtteranceResult: Codable, Sendable {
+    public var id: String
+    public var reference: String
+    public var hypothesis: String
+    public var audioSeconds: Double
+    public var elapsedSeconds: Double
+    public var werPercent: Double
+    /// Compute time until the first text piece, with audio supplied without pacing.
+    public var firstTokenSeconds: Double?
+    /// Amount of input audio consumed when the first text piece becomes available.
+    public var firstTokenAudioSeconds: Double?
+    public var frameLatencyP50Seconds: Double? = nil
+    public var frameLatencyP95Seconds: Double? = nil
+    public var flushSeconds: Double? = nil
+}
+
 public struct EngineResult: Codable, Sendable {
     public var engine: String
     public var utterances: Int
@@ -23,7 +39,7 @@ public struct EngineResult: Codable, Sendable {
     public var loadElapsedSeconds: Double
     public var audioSecondsTotal: Double
     public var elapsedSecondsTotal: Double
-    public var peakRSSBytes: UInt64     // peak resident memory observed during run
+    public var peakRSSBytes: UInt64     // kernel-recorded resident-memory high-water mark
     public var rssDeltaBytes: Int64     // peak RSS minus pre-load RSS
     public var peakPhysicalFootprintBytes: UInt64 // peak unified-memory pressure
     public var physicalFootprintDeltaBytes: Int64 // peak footprint minus pre-load
@@ -31,6 +47,7 @@ public struct EngineResult: Codable, Sendable {
     public var throughputMeanXRT: Double
     public var throughputMedianXRT: Double
     public var throughputOverallXRT: Double
+    public var utteranceResults: [UtteranceResult]? = nil
 }
 
 public struct Report: Codable, Sendable {
@@ -38,6 +55,7 @@ public struct Report: Codable, Sendable {
     public var datasetPath: String
     public var utterances: Int
     public var results: [EngineResult]
+    public var mlxCacheLimitMB: Int? = nil
 }
 
 public enum ReportPrinter {

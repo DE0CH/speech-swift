@@ -85,6 +85,20 @@ final class StreamingAudioPlayerTests: XCTestCase {
         // Without engine, can't truly test — but should not crash
     }
 
+    func testPreservesLeadingQuietSamplesWhenWarmupSkippingIsDisabled() {
+        let quiet = [Float](repeating: 0.001, count: 1000)
+        let defaultPlayer = StreamingAudioPlayer()
+        defaultPlayer.scheduleChunk(quiet)
+        XCTAssertEqual(defaultPlayer.totalWrittenSamples, 0)
+
+        let player = StreamingAudioPlayer()
+        player.skipInitialSilence = false
+        player.scheduleChunk(quiet)
+        player.scheduleChunk([Float](repeating: 0.2, count: 200))
+        XCTAssertEqual(player.totalWrittenSamples, 1200)
+        player.markGenerationComplete()
+    }
+
     func testStartupDeclickDefaultDoesNotAddLatency() {
         let input = [Float](repeating: 1, count: 100)
         let output = StreamingAudioPlayer.startupDeclick(input, sampleRate: 1000)

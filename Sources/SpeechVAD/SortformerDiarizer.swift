@@ -78,6 +78,7 @@ public final class SortformerDiarizer {
         offlineMode: Bool = false,
         config: SortformerConfig = .default,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> SortformerDiarizer {
         progressHandler?(0.0, "Downloading Sortformer model...")
@@ -90,6 +91,7 @@ public final class SortformerDiarizer {
             to: cacheDir,
             additionalFiles: ["\(modelFileName)/**", "config.json"],
             offlineMode: offlineMode,
+            downloadOptions: downloadOptions,
             progressHandler: { progress in
                 progressHandler?(progress * 0.8, "Downloading Sortformer model...")
             }
@@ -154,6 +156,7 @@ public final class SortformerDiarizer {
         offlineMode: Bool = false,
         config: SortformerConfig = .default,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
+        downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws {
         // Reuses fromPretrained so the load path is identical to what the
@@ -165,6 +168,7 @@ public final class SortformerDiarizer {
             offlineMode: offlineMode,
             config: config,
             computeUnits: computeUnits,
+            downloadOptions: downloadOptions,
             progressHandler: progressHandler)
     }
 
@@ -390,7 +394,7 @@ public final class SortformerDiarizer {
             }
         }
 
-        let frameDuration = Float(config.subsamplingFactor * config.hopLength)
+        let frameDuration = Float(config.predictionSubsamplingFactor * config.hopLength)
             / Float(config.sampleRate)
         var allSegments = [DiarizedSegment]()
         for spk in 0..<numSpeakers {

@@ -14,10 +14,9 @@ import XCTest
 ///     audio and `response.create` runs the S2S model on it
 ///
 /// These tests download model weights on first run. Skipped in CI via the
-/// `E2E` filter prefix; runs locally as part of `make test`.
+/// `E2E` filter prefix; runs locally with the isolated E2E runner.
 final class E2ERealtimeAPIEnginesTests: XCTestCase {
-    static var serverTask: Task<Void, Error>?
-    static let port = 19386
+    static let port = 19390
     private static let webSocketSession: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 300
@@ -25,19 +24,14 @@ final class E2ERealtimeAPIEnginesTests: XCTestCase {
         return URLSession(configuration: config)
     }()
 
-    override class func setUp() {
-        super.setUp()
-        serverTask = Task {
-            let server = AudioServer(host: "127.0.0.1", port: port)
+    override func setUp() async throws {
+        try await super.setUp()
+        let fixture = TestAudioServer(port: Self.port) {
+            let server = AudioServer(host: "127.0.0.1", port: Self.port)
             try await server.run()
         }
-        Thread.sleep(forTimeInterval: 1.5)
-    }
-
-    override class func tearDown() {
-        serverTask?.cancel()
-        Thread.sleep(forTimeInterval: 0.5)
-        super.tearDown()
+        addTeardownBlock { await fixture.stop() }
+        try await fixture.start()
     }
 
     // MARK: - Helpers
@@ -148,6 +142,21 @@ final class E2ERealtimeAPIEnginesTests: XCTestCase {
     }
 
     // MARK: - TTS dispatch
+
+    func testQwen3RuntimeTranscribesThroughWebSocket() async throws {
+        let ws = try await connect()
+        defer { ws.cancel(with: .normalClosure, reason: nil) }
+        _ = try await receiveJSON(ws)
+        try await sendJSON(ws, ["type": "session.update", "session": ["model": "qwen3"]])
+        _ = try await receiveJSON(ws)
+        let pcm = try testAudioPCM16At24kHz()
+        try await sendJSON(ws, ["type": "input_audio_buffer.append", "audio": pcm.base64EncodedString()])
+        try await sendJSON(ws, ["type": "input_audio_buffer.commit"])
+        let response = try await drainResponse(ws)
+        let transcript = try XCTUnwrap(response.transcript).lowercased()
+        XCTAssertTrue(transcript.contains("replacement"), transcript)
+        XCTAssertTrue(transcript.contains("tomorrow"), transcript)
+    }
 
     /// Default Kokoro TTS produces non-empty audio.
     func testDefaultKokoroTTSSynthesizes() async throws {

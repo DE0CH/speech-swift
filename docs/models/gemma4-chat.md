@@ -9,9 +9,71 @@ Swift MLX backend for Gemma 4 text checkpoints in the `Qwen3Chat` module. The pu
 - `aufklarer/gemma-4-E4B-it-MLX-4bit`
 - `aufklarer/gemma-4-E2B-it-MLX-4bit`
 
-The implementation targets the text tower from Gemma 4 multimodal-style configs. It is a hand-written Swift port of the Gemma 4 text architecture, not a wrapper around `mlx-swift-lm`.
+`Gemma4Chat` implements the text tower from Gemma 4 multimodal-style configs in Swift. `Gemma4UnifiedChat` uses the pinned `mlx-swift-lm` implementation for 12B, as described below.
 
 ## Architecture
+
+### Gemma 4 12B Unified text model
+
+`Gemma4UnifiedChat` loads the 12B Unified text model through the pinned
+`mlx-swift-lm` implementation. It supports a local affine INT4 checkpoint with
+group size 64, 48 layers, and a hidden size of 3840. This model has no per-layer
+embeddings and shares the key/value projection in global-attention layers.
+
+```swift
+let chat = try Gemma4UnifiedChat.fromDirectory(
+    URL(fileURLWithPath: "/models/gemma-4-12B-it-4bit"))
+let reply = try chat.generateResponse(
+    messages: [.init(role: .user, content: "Hello")],
+    sampling: .init(temperature: 0, maxTokens: 128))
+```
+
+Native tool declarations, calls, and result history use `Gemma4Tool` and
+`Gemma4ConversationMessage`. Response parsing removes channel delimiters from
+returned text, including a closing marker generated after a tool result. Tool
+argument strings retain their original values. For 12B, repeated adjacent
+terminators immediately after a fully validated call are consumed with that
+call. Standalone terminators, incomplete calls, and invalid arguments remain
+errors. The public codec and E4B keep strict terminator handling. Cancellation is cooperative. Prefill evaluates
+KV state in batches of at most 256 tokens, then computes initial vocabulary
+logits for the final prompt token only. Intermediate prompt positions do not
+materialize discarded vocabulary projections.
+
+The instance retains one unchanged system/tool prefix in complete 256-token
+blocks, within the existing `SPEECH_SWIFT_GEMMA4_PREFIX_CACHE_MB` budget
+(1,024 MiB by default for 12B; `0` disables reuse). E4B retains its existing
+512 MiB default. Reuse requires identical prefix token
+IDs. Each request extends an independent copy of the retained cache, including
+sliding-window position metadata. User messages, assistant history, and tool
+results are never added to the retained snapshot. Working state is released
+after generation or cancellation; `clearPrefixCache()` releases the retained
+snapshot. `lastCachedPrefixTokens` reports reuse for the most recent request,
+with `0` for a cold prefill. Calls on an instance must remain serialized.
+
+The native inference HTTP response exposes the optional `cachedPrefixTokens`
+count for 12B chat. Capabilities advertise `system_prefix_cache` when enabled,
+and provenance records `gemma4_12b_prefix_cache_budget_bytes` in the effective
+configuration. The first request still pays for the full prompt prefill.
+
+This interface provides
+buffered text/tool responses; it rejects constrained response formats. Vision
+and audio input use other modules and are outside this text interface.
+
+For 12B, `role: tool` content is wrapped verbatim as text in the native
+`response:name{value:...}` block, matching the checkpoint's standard chat
+template. JSON object, array, and scalar text keeps its original encoding.
+`Gemma4Chat` retains its existing structured JSON tool-response representation.
+
+`generateResponse` accepts an optional `onGeneration` callback for a
+`Gemma4GenerationTrace`. It runs after generation and before tool parsing, so a
+malformed completion remains available even when parsing throws. The trace
+contains the rendered prompt, prompt/generated token IDs, raw output, stop token
+ID, and `stop` or `length` finish reason. It is disabled by default and does not
+alter sampling or parser acceptance. See the native inference server guide for
+opt-in local failure files.
+
+The following architecture and streaming sections describe `Gemma4Chat` for
+E2B and E4B.
 
 Gemma 4 text differs from Qwen-style dense chat models in several important ways:
 
@@ -135,6 +197,18 @@ Nothing about the construction makes the two agree, so tests hold them together.
 
 The one divergence is inherent: neither path breaks equal probabilities by index — the host ranks candidates with `Array.sort`, the device with `argSort` — so on exactly equal logits they may return different tokens *of equal probability*. The lm_head emits bfloat16, whose eight mantissa bits make exact ties common in the tail of a nucleus; measured over 1,000 sampled steps of a real decode, six landed on such a tie and none differed for any other reason. Greedy decoding is unaffected, because `argMax` and the host's strict `>` scan both take the lowest index among equal maxima.
 
+## Repeated System Turns
+
+A caller running fixed instructions over many inputs sends the same system turn with every request. `Gemma4Chat` keeps the model state just past a system turn — every producing layer's K/V over it, about 57 KB a token — and a request whose prompt starts with the same tokens copies that state and prefills only the rest. `Gemma4ChatTemplate.systemTurnLength` gives the boundary, which is where `encode` ends the system segment.
+
+- Kept states are most recently used last and bounded by bytes: `SPEECH_SWIFT_GEMMA4_PREFIX_CACHE_MB` (default 512; `0` turns reuse off). `clearPrefixCache()` returns the memory.
+- The copy shares arrays with the kept state. The first write into either cache finds the buffer held twice, so MLX cannot donate it and writes into a new one; the kept state is never written into.
+- A split prefill is the whole prefill in two passes, so a hit and a miss decode the same tokens.
+
+Measured over 377 recorded requests from a Stenograf Discover run on E4B INT4 (M5 Pro), where system turns were 80% of prompt text: each request took 0.87x, 0.96x and 0.97x as long in three interleaved pairs, compared on requests whose greedy replies matched. The saving is bounded by prefill's share of a request; most of a request is decode.
+
+Where a decode step goes (`E2EGemma4PerfTests`, E4B INT4, M5 Pro): about 16 ms, of which the 42 MLPs are 9.1 ms reading 1.86 GB at about 205 GB/s and the tied output projection about 1.9 ms; building the step's graph on the CPU is about 1 ms. Queueing the next step on the still-unread token, and compiling each layer's feed-forward tail, were both measured and made no difference.
+
 ## Verification
 
 The backend has both deterministic and E2E coverage:
@@ -149,6 +223,11 @@ The backend has both deterministic and E2E coverage:
   prefill against the same tokens fed singly, and a split prefill against a whole one. Sliding
   layers evict what they can no longer read, so a cache index is no longer an absolute token
   position, and a wrong translation between the two reads the wrong keys without failing.
+  `testReusedSystemTurnDecodesLikeAWholePrompt` requires a whole prompt, a first split request and
+  a resumed one to decode the same greedy tokens.
+- `E2EGemma4PerfTests` (`GEMMA4_PERF=1`) reports prefill, per-token decode with and without a JSON
+  constraint, graph build against evaluation, and the decode step taken apart. It asserts nothing
+  about speed; run it with nothing else on the GPU.
 
 Reference parity prompt:
 

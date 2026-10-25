@@ -203,6 +203,9 @@ contradictory metadata fails with a typed
 `Qwen3TTSLoadingError.invalidConfiguration` before model allocation.
 
 `fromLocal` defaults to `.none`, leaving the process-wide Metal wired-memory limit unchanged.
+Both loaders separately cap MLX's reusable-buffer cache at `min(2 GiB, physical RAM / 4)`
+while the model is loaded, preserving a smaller caller budget. `unload()` releases
+that registration; remaining models keep their caps. See [MLX memory policy](mlx-memory.md).
 `fromPretrained` retains its existing `.pin(fraction: 0.9)` default for source compatibility.
 Both `fromPretrained` and `fromPretrainedWithEncoder` accept a separate `tokenizerCacheDir`.
 Apps with a shared resource governor should use `.none` and manage any Metal memory policy
@@ -343,9 +346,11 @@ tts.clearReferenceAudioCache()
 ```
 
 
-## CoreML Backend (Neural Engine)
+## CoreML Backend
 
-The CoreML backend uses 6 ANE-optimized models for on-device TTS inference:
+The CoreML backend uses six compiled models. The default 0.6B bundle uses the
+legacy Neural Engine route; the experimental 1.7B bundle defaults to CPU.
+The following component table describes the default 0.6B bundle:
 
 ### Architecture
 
@@ -381,18 +386,80 @@ Text -> [TextProjector] -> embeddings
 
 ### Conversion
 
+The reproducible six-component exporter is available at
+[`scripts/convert_qwen3_tts_coreml.py`](../../scripts/convert_qwen3_tts_coreml.py).
+See the [conversion guide](../../scripts/qwen3_tts_coreml/COREML.md) for pinned
+Python dependencies, serial export commands, speaker preparation, and numerical
+validation against the upstream checkpoint.
+
+The experimental exporter supports model-derived dimensions and a configurable CodeDecoder
+cache. For 1.7B Base, the talker and speaker embedding have 2048 channels, while
+the code predictor remains 1024-wide and requires its trained input projection.
+A 1024-position stateful CodeDecoder must be re-exported with matching cache and
+mask shapes; changing a generation limit alone is insufficient. CodeDecoder
+defaults to FP32 computation because FP16 failed real-checkpoint validation;
+its state tensors remain FP16.
+
 ```bash
 python scripts/convert_qwen3_tts_coreml.py \
-    --model-id Qwen/Qwen3-TTS-12Hz-0.6B-Base \
-    --output-dir models/Qwen3-TTS-CoreML \
-    --quantize-w8
+    --model-id Qwen/Qwen3-TTS-12Hz-1.7B-Base \
+    --revision fd4b254389122332181a7c3db7f27e918eec64e3 \
+    --tokenizer-revision 7dd38ad4e9bad454aae9cd937d0cd577604fe229 \
+    --max-seq-len 1024 --only CodeDecoder --compile \
+    --output-dir models/Qwen3-TTS-1.7B-CoreML
 ```
+
+Use one component per process as shown in the conversion guide to bound memory.
+The experimental [1.7B model bundle](https://huggingface.co/aufklarer/Qwen3-TTS-1.7B-CoreML)
+is approximately 7.1 GB. All six components pass CPU numerical checks against
+PyTorch, and a separate synthetic-input test fills all 1024 cache positions
+with exact fresh-state reset. Twelve English speech samples reach EOS and
+transcribe with 0% WER across 92 words. See the [CPU benchmark report](../benchmarks/qwen3-tts-17b-coreml.md)
+for latency and test scope. GPU/Neural Engine placement and iOS are not validated.
+
+The Swift runtime reads embedding width, talker cache capacity, predictor cache
+width, and SpeechDecoder frame capacity from `config.json`, and checks those
+dimensions against the compiled interfaces. It supports the original 0.6B/256
+bundle and the experimental 1.7B/1024 bundle. The default model stays 0.6B.
+The 2048-to-1024 predictor projection is inside the 1.7B compiled model; Swift
+passes the full 2048-channel input. Legacy chunked exports remain 0.6B-only.
+
+Cache capacity includes the text/speaker prompt and generated audio positions.
+SpeechDecoder has a separate fixed 125-frame capacity by default: 10 seconds at
+24 kHz and 1920 samples/frame. Increasing CodeDecoder to 1024 does not enlarge
+SpeechDecoder or guarantee a particular compute-device placement. Both runners
+reject requests exceeding the exported speech-frame capacity. Swift also rejects
+empty generation budgets and prompts that exhaust the talker cache, and creates
+a fresh cache for each synthesis request.
+
+Speaker embeddings must be finite, little-endian Float32 NPY vectors matching
+the talker width (1024 for 0.6B, 2048 for 1.7B). The public 1.7B bundle has no
+default speaker; prepare one with the [export guide](../../scripts/qwen3_tts_coreml/COREML.md)
+and pass `speakerEmbeddingURL`, or assign `speakerEmbedding` as a
+`[1, hiddenSize, 1, 1]` MLMultiArray before synthesis. Speaker extraction from
+reference audio is still a separate Python preparation step.
+
+When `computeUnits` is omitted, decoder routing remains CPU+ANE for 0.6B and
+CPU-only for 1.7B. An explicit `computeUnits` value selects the decoder route;
+`SPEECH_COREML_COMPUTE_UNITS` and per-component `QWEN3TTS_ROUTE_CD`,
+`QWEN3TTS_ROUTE_MCD`, `QWEN3TTS_ROUTE_SD` overrides remain available.
+Embedders always run on CPU. GPU/ANE and iOS validation for 1.7B is separate
+from the CPU integration tests.
+
 
 ### Usage (Swift)
 
 ```swift
 let model = try await Qwen3TTSCoreMLModel.fromPretrained()
 let audio = try model.synthesize(text: "Hello world", language: "english")
+
+let large = try await Qwen3TTSCoreMLModel.fromPretrained(
+    modelId: Qwen3TTSCoreMLModel.largeModelId,
+    speakerEmbeddingURL: URL(fileURLWithPath: "speaker-17b.npy")
+)
+let largeAudio = try large.synthesize(text: "Hello world", language: "english")
+// large.hiddenSize == 2048; large.maxSequenceLength == 1024
+// large.maximumAudioFrames == 125 for the published bundle
 ```
 
 ### CLI
@@ -400,3 +467,21 @@ let audio = try model.synthesize(text: "Hello world", language: "english")
 ```bash
 speech speak "Hello world" --engine coreml --output hello.wav
 ```
+
+Select the experimental bundle through the dedicated CoreML command:
+
+```sh
+speech qwen3-tts-coreml "Hello world" \
+  --model aufklarer/Qwen3-TTS-1.7B-CoreML \
+  --speaker-embedding speaker-17b.npy --output hello-17b.wav
+
+# Use an existing local bundle instead of downloading it:
+speech qwen3-tts-coreml "Hello world" \
+  --model-directory /path/to/bundle \
+  --speaker-embedding speaker-17b.npy --output hello-17b.wav
+```
+
+`--model-directory` takes precedence over downloading `--model`.
+`--max-tokens` must fit the bundle's independent SpeechDecoder capacity
+(default 125). The `speech speak --engine coreml` convenience command keeps
+its existing default model and flags.
