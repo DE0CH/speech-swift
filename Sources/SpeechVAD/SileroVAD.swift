@@ -37,6 +37,7 @@ public enum SileroVADEngine: String, Sendable {
 /// let segments = vad.detectSpeech(audio: samples, sampleRate: 16000)
 /// ```
 public final class SileroVADModel {
+    var mlxCacheLimitLease: MLXCacheLimitCoordinator.Lease?
 
     /// The inference engine in use.
     public let engine: SileroVADEngine
@@ -84,6 +85,8 @@ public final class SileroVADModel {
     public static let sampleRate = 16000
 
     init(network: SileroVADNetwork) {
+        mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
         self.engine = .mlx
         self.network = network
         self.context = [Float](repeating: 0, count: Self.contextSize)
@@ -260,6 +263,8 @@ public final class SileroVADModel {
 
         switch engine {
         case .mlx:
+            let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+            defer { loadingCacheLimit?.release() }
             try await HuggingFaceDownloader.downloadWeights(
                 modelId: resolvedModelId,
                 to: cacheDir,

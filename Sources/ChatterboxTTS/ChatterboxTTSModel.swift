@@ -2,6 +2,7 @@ import AudioCommon
 import Foundation
 import MLX
 import MLXNN
+import MLXCommon
 
 // MARK: - ChatterboxTTSModel — end-to-end multilingual voice cloning
 //
@@ -91,6 +92,8 @@ public extension ChatterboxTTSModel {
 #endif
 
 public final class ChatterboxTTSModel {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public let tokenizer: MTLTokenizer
     public let voiceEncoder: ChatterboxVoiceEncoder
     public let t3: ChatterboxT3
@@ -151,6 +154,9 @@ public final class ChatterboxTTSModel {
         s3TokenizerWeights: URL,
         conformerWeights: URL? = nil
     ) throws -> ChatterboxTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let fm = FileManager.default
         let modelPath = bundleDir.appendingPathComponent("model.safetensors")
         for p in [modelPath.path, s3TokenizerWeights.path] where !fm.fileExists(atPath: p) {
@@ -265,6 +271,9 @@ public final class ChatterboxTTSModel {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> ChatterboxTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let bundleDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
         let tokenizerDir = try HuggingFaceDownloader.getCacheDirectory(
             for: s3TokenizerModelId, cacheDirName: "chatterbox-s3-tokenizer")

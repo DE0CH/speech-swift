@@ -3,6 +3,7 @@ import MLX
 import MLXNN
 import MLXRandom
 import AudioCommon
+import MLXCommon
 
 // MARK: - Public errors
 
@@ -50,6 +51,8 @@ public struct FlashSRParams: Sendable {
 ///   6. SR Vocoder (mel + LR audio condition) → 48 kHz waveform.
 ///   7. Denormalize.
 public final class FlashSR {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public let config: FlashSRConfig
     internal let vae: FlashSRAutoencoderKL
     internal let unet: FlashSRAudioSRUnet
@@ -81,6 +84,9 @@ public final class FlashSR {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> FlashSR {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let paths = try await FlashSRDownloader.ensureDownloaded(
             variant: variant, downloadOptions: downloadOptions, progressHandler: progressHandler)
         let cfg = try FlashSRConfig.load(from: paths.bundleDir.appendingPathComponent("config.json"))

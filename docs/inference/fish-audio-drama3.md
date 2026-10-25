@@ -33,7 +33,7 @@ speech speak "Hello again." --engine fish-drama3 \
 | `--fish-drama3-top-p` | `0.9` | Nucleus probability |
 | `--stream` | `false` | Deliver PCM while codebooks are generated |
 | `--fish-drama3-chunk-frames` | `3` | Frames per PCM chunk, 1–128; 3 frames contain about 139 ms of audio |
-| `--fish-drama3-memory-mode` | `balanced` | Stage-boundary cache trimming and deferred reference encoder loading; `unrestricted` loads eagerly and preserves allocator caching |
+| `--fish-drama3-memory-mode` | `balanced` | Stage-boundary cache trimming and deferred reference encoder loading; `unrestricted` loads eagerly and skips stage trimming; the lifetime cap still applies |
 | `--seed` | `0` | Request-local sampling seed |
 
 The CLI accepts one complete text and writes a WAV. `--stream` decodes and
@@ -68,7 +68,8 @@ let cloned = try await model.generate(
 The default `memoryOptions: .balanced` evaluates intermediate codec stages and
 trims idle MLX buffers when the cache exceeds 512 MiB at a stage boundary. This
 is a trimming threshold, not a ceiling on total memory or temporary allocations.
-Active tensors and the caller's global MLX memory/cache limits are preserved.
+Active tensors are preserved. Separately, the model holds the shared
+[default MLX cache cap](mlx-memory.md) while loaded, preserving lower caller budgets.
 Model loading, prompt prefill, generated frames, codec stages and request
 completion provide trimming points. Model admission remains held during cleanup.
 
@@ -81,7 +82,7 @@ codes do not need the encoder.
 ```swift
 let model = try await FishAudioDrama3Model.fromBundle(
     bundleURL, memoryOptions: .balanced)
-// Pass .unrestricted instead for eager loading and the previous allocator behavior.
+// Pass .unrestricted for eager loading without stage trimming; the lifetime cap still applies.
 ```
 
 For a custom policy, pass

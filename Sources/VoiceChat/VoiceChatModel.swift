@@ -2,6 +2,7 @@ import AudioCommon
 import Foundation
 import Hub
 import MLX
+import MLXCommon
 
 public typealias VoiceChatLoadProgressHandler = @Sendable (
     _ progress: Double,
@@ -14,6 +15,8 @@ public typealias VoiceChatLoadProgressHandler = @Sendable (
 /// EAR-TTS or codec weights fails immediately instead of degrading to the
 /// understanding-only path.
 public final class VoiceChatModel {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public static let defaultModelID =
         "aufklarer/VoiceChat-11B-Perception-MLX-int8"
 
@@ -44,6 +47,9 @@ public final class VoiceChatModel {
         from root: URL,
         progressHandler: VoiceChatLoadProgressHandler? = nil
     ) async throws -> VoiceChatModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let encoderDirectory = root.appendingPathComponent("encoder")
         let languageDirectory = root.appendingPathComponent("llm")
         let speechDirectory = root.appendingPathComponent("tts")

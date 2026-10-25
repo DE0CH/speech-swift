@@ -3,6 +3,7 @@ import Foundation
 import MLX
 import MLXNN
 import SpeechRuntime
+import MLXCommon
 
 final class VoxtralAudioEmbeddings: Module {
     @ModuleInfo var embeddings: Embedding
@@ -30,6 +31,8 @@ final class VoxtralTTSNetwork: Module {
 /// Voxtral 4B TTS with the checkpoint's preset voices. Each request owns its KV
 /// cache, audio frames and random keys. Calls on one model are admitted serially.
 public final class VoxtralTTSModel: SpeechGenerationModel, @unchecked Sendable {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public static let defaultModelId = "aufklarer/Voxtral-4B-TTS-2603-MLX-4bit"
     public static let defaultVoice = "casual_male"
     public static let voices = [
@@ -58,6 +61,9 @@ public final class VoxtralTTSModel: SpeechGenerationModel, @unchecked Sendable {
     }
 
     public static func fromBundle(_ directory: URL) throws -> VoxtralTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let config = try JSONDecoder().decode(VoxtralTTSConfig.self,
             from: Data(contentsOf: directory.appendingPathComponent("config.json")))
         let tokenizer = try VoxtralTTSTokenizer(tekkenURL: directory.appendingPathComponent("tekken.json"))
@@ -100,6 +106,9 @@ public final class VoxtralTTSModel: SpeechGenerationModel, @unchecked Sendable {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> VoxtralTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         try Task.checkCancellation()
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
         // Preset embeddings are required assets outside the backbone's weight index.

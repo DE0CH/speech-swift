@@ -10,6 +10,8 @@ import MLXCommon
 /// increments, so partial text arrives without reprocessing the recording.
 /// INT5 and INT8 use the same BF16 recurrent state and streaming geometry.
 public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public static let defaultModelId = NemotronMLXVariant.int5.modelId
     public static let inputSampleRate = 16_000
 
@@ -67,6 +69,9 @@ public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> NemotronStreamingASRMLXModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let model = try await fromPretrained(
             modelId: variant.modelId,
             cacheDir: cacheDir,
@@ -90,6 +95,9 @@ public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> NemotronStreamingASRMLXModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let directory: URL
         do {
             directory = try cacheDir
@@ -136,6 +144,9 @@ public final class NemotronStreamingASRMLXModel: @unchecked Sendable {
         modelId: String = "local/Nemotron-3.5-Streaming-MLX",
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> NemotronStreamingASRMLXModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         for file in requiredBundleFiles where !FileManager.default.fileExists(
             atPath: directory.appendingPathComponent(file).path
         ) {

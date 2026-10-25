@@ -34,6 +34,7 @@ public enum WeSpeakerEngine: String, Sendable {
 /// // embedding: [Float] of length 256
 /// ```
 public final class WeSpeakerModel {
+    var mlxCacheLimitLease: MLXCacheLimitCoordinator.Lease?
 
     /// The inference engine in use.
     public let engine: WeSpeakerEngine
@@ -68,6 +69,8 @@ public final class WeSpeakerModel {
     static let enumeratedMelLengths = [20, 50, 100, 200, 300, 500, 750, 1000, 1500, 2000]
 
     init(network: WeSpeakerNetwork) {
+        mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
         self.engine = .mlx
         self.network = network
         self.melExtractor = MelFeatureExtractor()
@@ -110,6 +113,8 @@ public final class WeSpeakerModel {
 
         switch engine {
         case .mlx:
+            let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+            defer { loadingCacheLimit?.release() }
             try await HuggingFaceDownloader.downloadWeights(
                 modelId: resolvedModelId,
                 to: cacheDir,

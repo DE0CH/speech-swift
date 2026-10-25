@@ -16,6 +16,8 @@ import MLXCommon
 // in speech-swift on our exported weights.
 
 public final class CSMPipeline {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public let cfg: CSMConfig
     let model: CSMModel
     let mimi: Mimi
@@ -25,6 +27,9 @@ public final class CSMPipeline {
     public static func fromPretrained(
         _ repoId: String = "aufklarer/CSM-1B-MLX-8bit", offlineMode: Bool = false, downloadOptions: DownloadOptions = .init()
     ) async throws -> CSMPipeline {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let dir = try HuggingFaceDownloader.getCacheDirectory(for: repoId)
         try await HuggingFaceDownloader.downloadFiles(
             modelId: repoId, to: dir,

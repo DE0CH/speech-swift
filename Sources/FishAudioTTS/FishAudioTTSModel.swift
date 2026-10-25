@@ -4,6 +4,8 @@ import MLX
 import MLXCommon
 
 public final class FishAudioTTSModel: SpeechGenerationModel, @unchecked Sendable {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public static let defaultModelId = FishAudioConfig.defaultModelId
     private static let downloadProgressShare = 0.85
     private static let requiredFiles = [
@@ -65,6 +67,9 @@ public final class FishAudioTTSModel: SpeechGenerationModel, @unchecked Sendable
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> FishAudioTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
         try await HuggingFaceDownloader.downloadFilesByteWeighted(
             modelId: modelId,
@@ -88,6 +93,9 @@ public final class FishAudioTTSModel: SpeechGenerationModel, @unchecked Sendable
         _ directory: URL,
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> FishAudioTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         progressHandler?(0.05, "Loading Fish Audio config")
         let config = try FishAudioConfig.load(from: directory.appendingPathComponent("config.json"))
 

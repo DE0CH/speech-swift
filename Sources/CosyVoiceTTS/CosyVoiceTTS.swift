@@ -30,6 +30,8 @@ public enum CosyVoiceTTSError: Error, LocalizedError {
 ///
 /// - Warning: This class is not thread-safe. Create separate instances for concurrent use.
 public final class CosyVoiceTTSModel {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     /// Default HuggingFace model identifier — the 0.5B bf16 MLX bundle. Single
     /// SSOT for the registry and other call sites.
     public static let defaultModelId = "aufklarer/CosyVoice3-0.5B-MLX-bf16"
@@ -64,6 +66,9 @@ public final class CosyVoiceTTSModel {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> CosyVoiceTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         // Get cache directory
         let cacheDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
 

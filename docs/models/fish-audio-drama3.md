@@ -78,15 +78,16 @@ codebooks. Returned codebooks retain the tower's original token values.
 Drama 3 uses `FishAudioMemoryOptions.balanced` by default. It evaluates codec
 intermediates between layers so temporary buffers can be reused or released,
 and trims idle MLX allocations above a 512 MiB threshold at stage boundaries.
-It leaves live tensors and the process-wide allocator limits intact. The
-threshold does not bound allocations made within a stage.
+It leaves live tensors intact. The threshold does not bound allocations made
+within a stage. The model also holds the shared
+[default MLX cache cap](../inference/mlx-memory.md) for its lifetime.
 
 The codec loads decoding weights first. Encoder, quantizer pre-transformer
 and downsampling weights are materialized only on the first reference encoding,
 saving 794.4 MiB for text-only requests or precomputed reference codes. Those
 weights remain loaded after cloning begins. The bundle's codec file must remain
 available for that first encoding. `memoryOptions: .unrestricted` restores eager
-loading and leaves the allocator cache intact. The shared S2 Pro codec loader
+loading and disables stage trimming; the lifetime cap still applies. The shared S2 Pro codec loader
 retains its previous behavior.
 
 ## Validation

@@ -17,6 +17,8 @@ import AudioCommon
 /// ignored. The 40 s reference cap and utterance-level layer-norm preprocessing
 /// match the CoreML path exactly.
 public final class OmnilingualASRMLXModel {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public let config: OmnilingualMLXConfig
     public let frontend: Wav2Vec2Frontend
     public let encoder: Wav2Vec2Encoder
@@ -62,6 +64,9 @@ public final class OmnilingualASRMLXModel {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> OmnilingualASRMLXModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let resolvedModelId = modelId ?? OmnilingualMLXConfig.defaultModelId(
             variant: variant, bits: bits)
         let detectedVariant = detectVariant(from: resolvedModelId) ?? variant
