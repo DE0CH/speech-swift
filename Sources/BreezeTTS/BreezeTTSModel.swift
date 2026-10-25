@@ -27,6 +27,8 @@ final class BreezeNetwork: Module {
 /// Native Breeze TTS 2 inference. Use one generation at a time per instance.
 /// Weights and generated audio are subject to the upstream non-commercial license.
 public final class BreezeTTSModel: SpeechGenerationModel, @unchecked Sendable {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public static let defaultModelId = "aufklarer/Breeze-TTS-2-MLX-8bit"
     public let config: BreezeTTSConfig
     public var sampleRate: Int { config.sampleRate }
@@ -52,6 +54,9 @@ public final class BreezeTTSModel: SpeechGenerationModel, @unchecked Sendable {
     public static func fromPretrained(modelId: String = defaultModelId, cacheDir: URL? = nil,
         offlineMode: Bool = false, downloadOptions: DownloadOptions = .init(), progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> BreezeTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
         try await HuggingFaceDownloader.downloadFiles(modelId: modelId, to: directory,
             files: requiredFiles, offlineMode: offlineMode, downloadOptions: downloadOptions) { progress in
@@ -63,6 +68,9 @@ public final class BreezeTTSModel: SpeechGenerationModel, @unchecked Sendable {
     public static func fromBundle(_ directory: URL,
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> BreezeTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         for file in requiredFiles where !FileManager.default.fileExists(atPath: directory.appendingPathComponent(file).path) {
             throw BreezeTTSError.missingFile(file)
         }

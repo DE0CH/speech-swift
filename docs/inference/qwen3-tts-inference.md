@@ -196,6 +196,9 @@ contradictory metadata fails with a typed
 `Qwen3TTSLoadingError.invalidConfiguration` before model allocation.
 
 `fromLocal` defaults to `.none`, leaving the process-wide Metal wired-memory limit unchanged.
+Both loaders separately cap MLX's reusable-buffer cache at `min(2 GiB, physical RAM / 4)`
+while the model is loaded, preserving a smaller caller budget. `unload()` releases
+that registration; remaining models keep their caps. See [MLX memory policy](mlx-memory.md).
 `fromPretrained` retains its existing `.pin(fraction: 0.9)` default for source compatibility.
 Both `fromPretrained` and `fromPretrainedWithEncoder` accept a separate `tokenizerCacheDir`.
 Apps with a shared resource governor should use `.none` and manage any Metal memory policy

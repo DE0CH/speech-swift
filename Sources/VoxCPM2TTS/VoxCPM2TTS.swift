@@ -65,7 +65,7 @@ public final class VoxCPM2TTSModel: Module {
     private var _isLoaded: Bool = true
     /// Registration in the process-wide MLX cache budget. Released by `unload()`
     /// or automatically when this model is destroyed.
-    var mlxCacheLimitLease: MLXCacheLimitCoordinator.Lease?
+    var mlxCacheLimitLease: MLXCacheLimitCoordinator.Lease? = MLXCacheLimitCoordinator.shared.acquireDefault()
     private static var debugVerboseEnabled: Bool {
         ProcessInfo.processInfo.environment["VOXCPM2_DEBUG_VERBOSE"] == "1"
     }

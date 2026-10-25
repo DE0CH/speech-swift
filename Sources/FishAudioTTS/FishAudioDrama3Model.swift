@@ -3,9 +3,12 @@ import Foundation
 import MLX
 import MLXNN
 import SpeechRuntime
+import MLXCommon
 
 /// Experimental native Drama 3 inference using the converted MLX checkpoint format.
 public final class FishAudioDrama3Model: SpeechGenerationModel, @unchecked Sendable {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public static let defaultModelId = "mlx-community/fish-audio-drama-3-4bit"
     public let config: FishAudioDrama3Config
     public let sampleRate = FishAudioCodecDefaults.sampleRate
@@ -28,6 +31,9 @@ public final class FishAudioDrama3Model: SpeechGenerationModel, @unchecked Senda
                                       memoryOptions: FishAudioMemoryOptions = .balanced,
                                       downloadOptions: DownloadOptions = .init(),
                                       progressHandler: ((Double, String) -> Void)? = nil) async throws -> FishAudioDrama3Model {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         try memoryOptions.validate()
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
         try await HuggingFaceDownloader.downloadFiles(modelId: modelId, to: directory,
@@ -43,6 +49,9 @@ public final class FishAudioDrama3Model: SpeechGenerationModel, @unchecked Senda
     public static func fromBundle(_ directory: URL,
                                   memoryOptions: FishAudioMemoryOptions = .balanced,
                                   progressHandler: ((Double, String) -> Void)? = nil) async throws -> FishAudioDrama3Model {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         try memoryOptions.validate()
         progressHandler?(0, "Loading Drama 3 configuration")
         let config = try FishAudioDrama3Config.load(from: directory.appendingPathComponent("config.json"))

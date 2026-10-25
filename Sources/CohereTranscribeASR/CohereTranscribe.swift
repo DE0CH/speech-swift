@@ -5,6 +5,7 @@ import AudioCommon
 import Foundation
 import MLX
 import MLXNN
+import MLXCommon
 
 private struct CoherePrefillContext {
     let encoderStates: MLXArray
@@ -34,6 +35,8 @@ public enum CohereTranscribeError: Error, LocalizedError {
 }
 
 public final class CohereTranscribeModel: Module, SpeechRecognitionModel, @unchecked Sendable {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public static let defaultModelId = CohereTranscribeVariant.int5.modelId
     static let supportedQuantizationBits = Set([2, 3, 4, 5, 6, 8])
     static let downloadAdditionalFiles = ["tokenizer.model", "tokenizer_config.json"]
@@ -225,6 +228,9 @@ public extension CohereTranscribeModel {
     }
 
     static func fromDirectory(_ directory: URL) throws -> CohereTranscribeModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let config = try JSONDecoder().decode(
             CohereTranscribeConfig.self,
             from: Data(contentsOf: directory.appendingPathComponent("config.json")))
@@ -267,6 +273,9 @@ public extension CohereTranscribeModel {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> CohereTranscribeModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         var isDirectory: ObjCBool = false
         if FileManager.default.fileExists(atPath: modelPath, isDirectory: &isDirectory),
            isDirectory.boolValue {
@@ -286,6 +295,9 @@ public extension CohereTranscribeModel {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> CohereTranscribeModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
         try await HuggingFaceDownloader.downloadWeights(
             modelId: modelId,

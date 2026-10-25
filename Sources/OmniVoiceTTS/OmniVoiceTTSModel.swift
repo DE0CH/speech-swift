@@ -2,12 +2,15 @@ import AudioCommon
 import Foundation
 import MLX
 import MLXNN
+import MLXCommon
 
 /// High-level OmniVoice voice-cloning TTS. Downloads / loads the bundle and
 /// synthesizes cloned speech from a reference clip + target text, wrapping the
 /// Qwen3 diffusion backbone, the Higgs-audio v2 codec (encode + decode), and the
 /// text front-end. This is the entry point the Studio sidecar drives.
 public final class OmniVoiceTTSModel {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     /// Default published bundle (fp16 backbone + fp16 codec). The int8 backbone
     /// remains loadable by passing `aufklarer/OmniVoice-MLX-int8` explicitly.
     public static let defaultModelId = OmniVoiceConfig.defaultModelId
@@ -38,6 +41,9 @@ public final class OmniVoiceTTSModel {
     /// `audio_tokenizer/model.safetensors` (codec), `tokenizer.json`, `config.json`.
     /// A `quantization` block in `config.json` selects the int8 load path.
     public static func fromBundle(_ dir: URL) async throws -> OmniVoiceTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let cfg = OmniVoiceConfig()
         let quant = readQuantization(dir.appendingPathComponent("config.json"))
 
@@ -64,6 +70,9 @@ public final class OmniVoiceTTSModel {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> OmniVoiceTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let dir = try HuggingFaceDownloader.getCacheDirectory(for: modelId)
         let fm = FileManager.default
         // Repair incomplete or pre-tokenizer-config caches. The HF snapshot fetch

@@ -266,6 +266,14 @@ let package = Package(
     targets: [
         .target(name: "PocketTTS", dependencies: ["AudioCommon", "SpeechRuntime"],
                 exclude: ["THIRD_PARTY_NOTICES.md", "Apache-2.0.txt"]),
+        .testTarget(
+            name: "MLXCommonTests",
+            dependencies: [
+                "MLXCommon", "AudioCommon", "SpeechVAD", "OmniVoiceTTS", "GLiNER",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXRandom", package: "mlx-swift")
+            ]
+        ),
         .testTarget(name: "PocketTTSTests", dependencies: ["PocketTTS", "AudioCommon"], resources: [.process("Resources")]),
         .executableTarget(name: "PocketTTSBenchmark", dependencies: ["PocketTTS", "KokoroTTS", "AudioCommon"]),
         .target(name: "SpeechRuntime"),
@@ -330,6 +338,7 @@ let package = Package(
         .target(
             name: "CohereTranscribeASR",
             dependencies: [
+                "MLXCommon",
                 "AudioCommon",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
@@ -485,6 +494,7 @@ let package = Package(
         .target(
             name: "KyutaiSTT",
             dependencies: [
+                "MLXCommon",
                 "AudioCommon", "PersonaPlex",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
@@ -765,6 +775,7 @@ let package = Package(
             .product(name: "MLXNN", package: "mlx-swift"),
             .product(name: "MLX", package: "mlx-swift")], resources: [.copy("Fixtures")]),
         .target(name: "GLiNER", dependencies: [
+            "MLXCommon",
             "AudioCommon",
             .product(name: "Hub", package: "swift-transformers"),
             .product(name: "MLX", package: "mlx-swift"),
@@ -821,6 +832,7 @@ let package = Package(
         .target(
             name: "Audio2Face3D",
             dependencies: [
+                "MLXCommon",
                 "AudioCommon",
                 .product(name: "MLX", package: "mlx-swift")
             ]
@@ -828,6 +840,7 @@ let package = Package(
         .target(
             name: "AudioCLILib",
             dependencies: [
+                "MLXCommon",
                 "FishAudioTTS",
                 "PocketTTS",
                 "VoxtralTTS",

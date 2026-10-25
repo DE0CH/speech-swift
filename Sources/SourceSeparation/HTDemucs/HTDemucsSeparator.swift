@@ -2,6 +2,7 @@ import Foundation
 import MLX
 import MLXNN
 import AudioCommon
+import MLXCommon
 
 /// Bag-of-models source separator for Hybrid Transformer Demucs (Demucs v4).
 ///
@@ -9,6 +10,8 @@ import AudioCommon
 /// each sub-model contributes only its own stem. Loads all sub-models from the
 /// exported safetensors (keys prefixed `model_{i}.`).
 public final class HTDemucsSeparator {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public let config: HTDemucsConfig
     let models: [HTDemucs]
 
@@ -35,6 +38,9 @@ public final class HTDemucsSeparator {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> HTDemucsSeparator {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let cacheDir = try HuggingFaceDownloader.getCacheDirectory(for: modelId)
         let name = precision.modelName
         progressHandler?(0.0, "Downloading \(name)...")
@@ -59,6 +65,9 @@ public final class HTDemucsSeparator {
     /// bundle in memory instead.
     public static func fromLocal(directory: URL, modelName: String = "htdemucs_ft",
                                  quantizeBits: Int? = nil) throws -> HTDemucsSeparator {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let cfg = try HTDemucsConfig.load(
             from: directory.appendingPathComponent("\(modelName)_config.json"))
         let all = try MLX.loadArrays(

@@ -2,6 +2,7 @@ import AudioCommon
 import Foundation
 import MLX
 import Tokenizers
+import MLXCommon
 
 /// Top-level speech-swift wrapper around the VibeVoice streaming model.
 ///
@@ -15,6 +16,8 @@ import Tokenizers
 /// let pcm = try await tts.generate(text: "Hello world.", language: nil)
 /// ```
 public final class VibeVoiceTTSModel {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     /// Default HuggingFace model identifier — the 0.5B INT4 Realtime bundle.
     public static let defaultModelId = "aufklarer/VibeVoice-Realtime-0.5B-MLX-INT4"
 
@@ -82,6 +85,9 @@ public final class VibeVoiceTTSModel {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> VibeVoiceTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let modelCacheDir = try cacheDir
             ?? HuggingFaceDownloader.getCacheDirectory(for: configuration.modelId)
         if !HuggingFaceDownloader.weightsExist(in: modelCacheDir) {

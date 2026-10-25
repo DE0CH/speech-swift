@@ -38,6 +38,10 @@ The `AudioCommon` module defines shared protocols that provide model-agnostic in
 
 ## Protocols
 
+MLX runtimes share a default reusable-buffer cache budget across model lifetimes.
+See [MLX memory policy](inference/mlx-memory.md) for caller limits, overlapping
+models, unload behavior and the distinction from total process memory.
+
 ### SpeechGenerationModel (TTS)
 
 Text-to-speech models that generate audio from text.

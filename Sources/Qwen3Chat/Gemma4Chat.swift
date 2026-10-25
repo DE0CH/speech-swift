@@ -12,6 +12,8 @@ import MLXCommon
 ///   • a reasoning *channel* `<|channel>thought\n…\n<channel|>` is emitted before the answer; for a
 ///     voice assistant we suppress it and stream only the post-channel answer text.
 public final class Gemma4Chat: @unchecked Sendable {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     /// Gemma-4 architecture config (used by the model + parity harness).
     public let denseConfig: Gemma4DenseConfig
     let model: Gemma4Model
@@ -58,6 +60,9 @@ public final class Gemma4Chat: @unchecked Sendable {
     public static func fromDirectory(
         _ directory: URL, progressHandler: ((Double, String) -> Void)? = nil
     ) throws -> Gemma4Chat {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let config = try Gemma4DenseConfig.load(from: directory.appendingPathComponent("config.json"))
         let gemmaTok = Gemma4Tokenizer()
         try gemmaTok.load(from: directory)
@@ -76,6 +81,9 @@ public final class Gemma4Chat: @unchecked Sendable {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> Gemma4Chat {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let cacheDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
         try await HuggingFaceDownloader.downloadWeights(
             modelId: modelId,

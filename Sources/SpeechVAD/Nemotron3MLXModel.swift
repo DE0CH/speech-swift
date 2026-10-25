@@ -218,6 +218,8 @@ private final class Nemotron3MLXNetwork: Module {
 }
 
 final class Nemotron3MLXBackend: Nemotron3InferenceBackend {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     private let network: Nemotron3MLXNetwork
     let learnedSilenceEmbedding: [Float]
 

@@ -4,6 +4,8 @@ import MLX
 import MLXCommon
 
 public final class IndicMioTTSModel: SpeechGenerationModel, @unchecked Sendable {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public static let defaultModelId = IndicMioBundleConfig.defaultModelId
 
     public let sampleRate: Int
@@ -48,6 +50,9 @@ public final class IndicMioTTSModel: SpeechGenerationModel, @unchecked Sendable 
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> IndicMioTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
         try await HuggingFaceDownloader.downloadWeights(
             modelId: modelId,
@@ -81,6 +86,9 @@ public final class IndicMioTTSModel: SpeechGenerationModel, @unchecked Sendable 
         _ directory: URL,
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> IndicMioTTSModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let configURL = directory.appendingPathComponent("config.json")
         let bundleConfig = try IndicMioBundleConfig.load(from: directory)
         let modelConfig = try IndicMioModelConfig.load(from: configURL)

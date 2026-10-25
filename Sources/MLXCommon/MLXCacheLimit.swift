@@ -1,6 +1,13 @@
 import Foundation
 import MLX
 
+/// Bounds spare buffers independently of model weights and live inference arrays.
+package enum MLXCacheLimitPolicy {
+    package static func defaultCeiling(physicalMemoryBytes: Int) -> Int {
+        max(0, min(2 * 1024 * 1024 * 1024, physicalMemoryBytes / 4))
+    }
+}
+
 /// Owns the process-wide MLX cache ceiling for cooperating model runtimes.
 /// Every model registers, even when another model or the caller already
 /// configured a lower limit. Releasing a registration can then preserve
@@ -23,8 +30,17 @@ package final class MLXCacheLimitCoordinator: @unchecked Sendable {
         self.setLimit = setLimit
     }
 
-    package func acquire(ceiling: Int) -> Lease? {
+    package func acquireDefault(
+        physicalMemoryBytes: Int = Int(ProcessInfo.processInfo.physicalMemory)
+    ) -> Lease? {
+        let ceiling = MLXCacheLimitPolicy.defaultCeiling(physicalMemoryBytes: physicalMemoryBytes)
         guard ceiling > 0 else { return nil }
+        return acquire(ceiling: ceiling)
+    }
+
+    package func acquire(ceiling: Int) -> Lease? {
+        // Zero is a valid request to disable caching, including during a generation stage.
+        guard ceiling >= 0 else { return nil }
         lock.lock()
         defer { lock.unlock() }
 

@@ -59,6 +59,8 @@ public enum ForcedAlignerVariant: String, CaseIterable, Sendable {
 /// vocab lm_head with a 5000-class timestamp classification head.
 /// Inference is non-autoregressive (single forward pass).
 public class Qwen3ForcedAligner {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public let audioEncoder: Qwen3AudioEncoder
     public let textDecoder: any ForcedAlignerTextDecoding
     public let classifyHead: Linear
@@ -454,6 +456,9 @@ public extension Qwen3ForcedAligner {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> Qwen3ForcedAligner {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         progressHandler?(0.0, "Downloading model...")
 
         let cacheDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)

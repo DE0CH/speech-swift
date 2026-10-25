@@ -142,7 +142,7 @@ public class Qwen3ASRModel {
 
     /// Registration in the shared cache-budget coordinator. Released by
     /// `unload()` or automatically when this model is destroyed.
-    var mlxCacheLimitLease: Qwen3ASRCacheLimitCoordinator.Lease?
+    var mlxCacheLimitLease: Qwen3ASRCacheLimitCoordinator.Lease? = MLXCacheLimitCoordinator.shared.acquireDefault()
 
     init(
         audioConfig: Qwen3AudioEncoderConfig = .default,

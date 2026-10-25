@@ -18,6 +18,8 @@ import AudioCommon
 /// }
 /// ```
 public final class PyannoteVADModel {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     /// The segmentation model
     let model: SegmentationModel
 
@@ -56,6 +58,9 @@ public final class PyannoteVADModel {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> PyannoteVADModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         progressHandler?(0.0, "Downloading model...")
 
         let cacheDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)

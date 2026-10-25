@@ -337,6 +337,8 @@ final class IndicMioWavLMEncoderLayer: Module {
 }
 
 public final class IndicMioWavLMFeatureModel: Module {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public static let defaultModelId = IndicMioReferenceConfig.defaultWavLMModelId
 
     @ModuleInfo(key: "feature_extractor") var featureExtractor: IndicMioWavLMFeatureEncoder
@@ -364,6 +366,9 @@ public final class IndicMioWavLMFeatureModel: Module {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> IndicMioWavLMFeatureModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
         try await HuggingFaceDownloader.downloadWeights(
             modelId: modelId,
@@ -376,6 +381,9 @@ public final class IndicMioWavLMFeatureModel: Module {
     }
 
     public static func fromBundle(_ directory: URL) throws -> IndicMioWavLMFeatureModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let weights = try CommonWeightLoader.loadAllSafetensors(from: directory)
         let model = IndicMioWavLMFeatureModel()
         model.loadWeights(from: weights)

@@ -2,6 +2,7 @@ import AudioCommon
 import Foundation
 import MLX
 import MLXNN
+import MLXCommon
 
 public enum VoxtralError: Error, LocalizedError {
     case invalidQuantization(bits: Int, groupSize: Int)
@@ -24,6 +25,8 @@ public enum VoxtralError: Error, LocalizedError {
 }
 
 public final class VoxtralModel: Module, SpeechRecognitionModel, @unchecked Sendable {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public static let defaultModelId = VoxtralVariant.int5.modelId
     static let supportedQuantizationBits = Set([2, 3, 4, 5, 6, 8])
     static let downloadAdditionalFiles = ["tekken.json", "preprocessor_config.json"]
@@ -141,6 +144,9 @@ public extension VoxtralModel {
     }
 
     static func fromDirectory(_ directory: URL) throws -> VoxtralModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let config = try JSONDecoder().decode(
             VoxtralConfig.self,
             from: Data(contentsOf: directory.appendingPathComponent("config.json")))
@@ -183,6 +189,9 @@ public extension VoxtralModel {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> VoxtralModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         var isDirectory: ObjCBool = false
         if FileManager.default.fileExists(atPath: modelPath, isDirectory: &isDirectory),
            isDirectory.boolValue {
@@ -202,6 +211,9 @@ public extension VoxtralModel {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> VoxtralModel {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let directory = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
         try await HuggingFaceDownloader.downloadWeights(
             modelId: modelId,

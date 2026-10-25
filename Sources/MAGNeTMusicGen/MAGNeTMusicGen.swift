@@ -55,6 +55,8 @@ public struct MAGNeTGenerationParams: Sendable {
 // MARK: - Main entry point
 
 public final class MAGNeTMusicGen {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     public let config: MAGNeTConfig
     public let encodecConfig: EncodecModelConfig
     public let t5Config: T5ModelConfig
@@ -94,6 +96,9 @@ public final class MAGNeTMusicGen {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> MAGNeTMusicGen {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let paths = try await MAGNeTDownloader.ensureDownloaded(
             variant: variant, downloadOptions: downloadOptions, progressHandler: progressHandler)
 

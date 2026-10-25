@@ -3,6 +3,7 @@ import CoreML
 import Foundation
 import AVFoundation
 import AudioCommon
+import MLXCommon
 
 /// CAM++ speaker embedding model (CoreML, Neural Engine).
 ///
@@ -11,6 +12,8 @@ import AudioCommon
 ///
 /// - Note: Download from HuggingFace on first use (~14 MB).
 public final class CamPlusPlusSpeaker {
+    var mlxCacheLimitLease = MLXCacheLimitCoordinator.shared.acquireDefault()
+
     private let model: MLModel
     private let melExtractor: CamPlusPlusMelExtractor
 
@@ -35,6 +38,9 @@ public final class CamPlusPlusSpeaker {
         downloadOptions: DownloadOptions = .init(),
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> CamPlusPlusSpeaker {
+        let loadingCacheLimit = MLXCacheLimitCoordinator.shared.acquireDefault()
+        defer { loadingCacheLimit?.release() }
+
         let cacheDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
 
         let modelURL = cacheDir.appendingPathComponent("CamPlusPlus.mlmodelc", isDirectory: true)
