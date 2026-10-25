@@ -166,9 +166,16 @@ Audio waveform [1, T*1920, 1] at 24kHz
 ### Implementation Notes
 
 - **Chunked codec decoding** — Codec frames processed in overlapping chunks (`chunkSize=25, leftContext=10`), reducing O(T²) attention to O(chunk²)
+- **Frame preservation** — Both pre-upsampling convolutions use kernel size equal to stride (2), without right trimming. Each codec frame yields exactly 1,920 samples at 24 kHz; overlap removal discards context only, preserving short final chunks and the reference/target boundary in ICL cloning.
 - **Batch embedding lookups** — All 15 codebook group embeddings summed in one call per step
 - **Bulk float extraction** — Waveform extracted via single `.asArray(Float.self)` call
 - **Causal mask in decoder transformer** — Additive causal mask for pre-transformer attention (required for chunked decoding correctness)
+
+`DecoderFrameGeometryTests` checks checkpoint-shaped weights and output lengths
+without downloading models. `E2EDecoderChunkGeometryTests` covers chunk and
+overlap boundaries. `E2EICLJapaneseSpeechTests` uses a system-generated Japanese
+reference and Japanese ASR to check the first word and sentence ending at two
+fixed seeds. Run model-backed classes separately, as described in the test guide.
 - **Compiled Talker** — `compile(shapeless: true)` processes the growing valid-prefix K/V cache
 - **Compiled code predictor** — Single-item synthesis runs the fixed 15-group autoregressive frame as one graph and extracts its tokens once; batch synthesis retains the per-group compiled transformer
 
