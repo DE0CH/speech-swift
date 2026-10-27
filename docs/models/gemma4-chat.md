@@ -29,7 +29,13 @@ let reply = try chat.generateResponse(
 ```
 
 Native tool declarations, calls, and result history use `Gemma4Tool` and
-`Gemma4ConversationMessage`. Response parsing removes channel delimiters from
+`Gemma4ConversationMessage`. Tool responses and a subsequent assistant
+continuation stay in the same model turn. If a user message follows the tool
+responses, the formatter closes the previous model turn before opening the user
+turn. This also applies after chained tool calls and preserves tool-result
+pairing by call ID. The turn boundary follows the
+[Gemma 4 canonical template](https://huggingface.co/google/gemma-4-12B-it/blob/main/chat_template.jinja).
+Response parsing removes channel delimiters from
 returned text, including a closing marker generated after a tool result. Tool
 argument strings retain their original values. For 12B, repeated adjacent
 terminators immediately after a fully validated call are consumed with that
