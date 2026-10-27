@@ -5,6 +5,36 @@ import XCTest
 @testable import Qwen3Chat
 
 final class E2EGemma4UnifiedTests: XCTestCase {
+    func testToolResultSurvivesFollowingUserTurn() throws {
+        guard let folder = ProcessInfo.processInfo.environment["GEMMA4_12B_MODEL_DIR"] else {
+            throw XCTSkip("Set GEMMA4_12B_MODEL_DIR to the staged Gemma 4 12B INT4 checkpoint")
+        }
+        Memory.cacheLimit = 128 * 1024 * 1024
+        Memory.memoryLimit = 20 * 1024 * 1024 * 1024
+        let chat = try Gemma4UnifiedChat.fromDirectory(URL(fileURLWithPath: folder))
+        let tool = Gemma4Tool(name: "read_record", description: "Read a record's current marker.",
+                             parameters: .object(["type": .string("object"),
+                                                  "properties": .object(["id": .object(["type": .string("string")])]),
+                                                  "required": .array([.string("id")])]))
+        for marker in ["blue_sunrise_714", "green_moon_829"] {
+            let call = Gemma4ToolCall(id: "read-1", name: tool.name, arguments: .object(["id": .string("record_7")]))
+            let result = "{\"status\":\"found\",\"marker\":\"\(marker)\"}"
+            let messages: [Gemma4ConversationMessage] = [
+                .init(role: .system, content: "Use the successful read_record result to answer. Never repeat a completed lookup. Reply with only its exact marker."),
+                .init(role: .user, content: "Read record_7."),
+                .init(role: .assistant, toolCalls: [call]),
+                .init(role: .tool, content: result, toolCallID: call.id),
+                .init(role: .user, content: "Thanks. What marker did that lookup return?")
+            ]
+            let prompt = try Gemma4UnifiedChat.prompt(messages: messages, tools: [tool])
+            XCTAssertTrue(prompt.contains("<tool_response|><turn|>\n<|turn>user\n"), prompt)
+            let reply = try chat.generateResponse(messages: messages, tools: [tool],
+                                                  sampling: .init(temperature: 0, maxTokens: 128, repetitionPenalty: 1))
+            XCTAssertTrue(reply.toolCalls.isEmpty)
+            XCTAssertTrue(reply.content.contains(marker), reply.content)
+        }
+    }
+
     func testLongPromptCacheOnlyPrefillMatchesReferenceGreedyTokens() throws {
         guard let folder = ProcessInfo.processInfo.environment["GEMMA4_12B_MODEL_DIR"] else {
             throw XCTSkip("Set GEMMA4_12B_MODEL_DIR to the staged Gemma 4 12B INT4 checkpoint")

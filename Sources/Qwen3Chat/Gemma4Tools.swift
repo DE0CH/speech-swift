@@ -170,6 +170,9 @@ public enum Gemma4ToolCodec {
             let message = messages[index]
             guard message.role != .tool else { throw Gemma4ToolError.malformed("orphan tool response") }
             let role = message.role == .assistant ? "model" : message.role.rawValue
+            if modelTurnOpen && message.role != .assistant {
+                text += "<turn|>\n"
+            }
             if !(message.role == .assistant && modelTurnOpen) { text += "<|turn>" + role + "\n" }
             modelTurnOpen = false
             let calls = message.toolCalls ?? []
