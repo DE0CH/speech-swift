@@ -25,6 +25,14 @@ public struct Qwen3DecodingOptions: Sendable {
     /// Context hint prepended to the decoder prompt.
     public var context: String?
 
+    /// Transcript text the decoder continues from: placed after `<asr_text>` as if the model had already written it, so
+    /// only what follows is generated (streaming: the previous pass's text minus its last few tokens). The result
+    /// includes it.
+    public var prefix: String?
+
+    /// Called on the decoding thread after each generated token with the transcript so far (prefix included).
+    public var onText: (@Sendable (String) -> Void)?
+
     /// HuggingFace-style repetition penalty. Divides the logits of tokens
     /// already generated this chunk by this factor before `argMax`.
     /// `1.0` disables; `1.1`–`1.3` is the common tuning range.
@@ -497,6 +505,10 @@ public class Qwen3ASRModel {
             inputIds.append(contentsOf: langTokens.map { Int32($0) })
         }
         inputIds.append(Int32(T.asrTextTokenId))
+        let prefix = decodingOptions.prefix ?? ""
+        if !prefix.isEmpty, let tokenizer = tokenizer {
+            inputIds.append(contentsOf: tokenizer.encode(prefix).map { Int32($0) })
+        }
 
         // Get text embeddings for all tokens
         let inputIdsTensor = MLXArray(inputIds).expandedDimensions(axis: 0)
@@ -528,6 +540,20 @@ public class Qwen3ASRModel {
         // legacy slow path stays on the per-token CPU sync because it pulls
         // the full logits tensor to CPU for repetition / n-gram / temperature
         // manipulation, which would defeat the overlap.
+        // The text so far: the prefix, then the generated tokens without a "language XX<asr_text>" lead or the EOS.
+        let tokenizer = self.tokenizer
+        func text(_ tokens: [Int32]) -> String {
+            guard let tokenizer else { return "" }
+            let eos = Int32(T.eosTokenId)
+            var raw = tokenizer.decode(tokens: tokens.filter { $0 != eos }.map { Int($0) })
+            if let range = raw.range(of: "<asr_text>") { raw = String(raw[range.upperBound...]) }
+            return prefix.isEmpty ? raw.trimmingCharacters(in: .whitespaces) : prefix + raw
+        }
+        var sofar: [Int32] = []
+        let onToken: ((Int32) -> Void)? = decodingOptions.onText.map { onText in
+            { token in sofar.append(token); onText(text(sofar)) }
+        }
+
         let generatedTokens: [Int32]
         if Self.isGreedyFastPath(decodingOptions) {
             generatedTokens = try Self.generateGreedyAsyncEval(
@@ -535,6 +561,7 @@ public class Qwen3ASRModel {
                 initialLogits: logits,
                 cache: cache!,
                 maxTokens: maxTokens,
+                onToken: onToken,
                 checkCancellation: checkCancellation
             )
         } else {
@@ -544,18 +571,14 @@ public class Qwen3ASRModel {
                 cache: cache!,
                 maxTokens: maxTokens,
                 options: decodingOptions,
+                onToken: onToken,
                 checkCancellation: checkCancellation
             )
         }
 
         // Decode tokens to text
-        if let tokenizer = tokenizer {
-            let rawText = tokenizer.decode(tokens: generatedTokens.map { Int($0) })
-            // Strip "language XX<asr_text>" prefix if present (auto-detection output)
-            if let range = rawText.range(of: "<asr_text>") {
-                return String(rawText[range.upperBound...]).trimmingCharacters(in: .whitespaces)
-            }
-            return rawText
+        if tokenizer != nil {
+            return text(generatedTokens)
         } else {
             // Fallback: return token IDs
             return generatedTokens.map { String($0) }.joined(separator: " ")
@@ -642,6 +665,7 @@ public class Qwen3ASRModel {
         initialLogits: MLXArray,
         cache initialCache: [(MLXArray, MLXArray)],
         maxTokens: Int,
+        onToken: ((Int32) -> Void)? = nil,
         checkCancellation: () throws -> Void
     ) rethrows -> [Int32] {
         var generatedTokens: [Int32] = []
@@ -703,6 +727,7 @@ public class Qwen3ASRModel {
             // pick, so greedy stays bit-identical.
             generatedTokens.append(nextToken)
             if nextToken == eosToken { break }
+            onToken?(nextToken)
 
             guard let advancedCache = cacheN1, let advancedToken = nextTokenArrN1 else {
                 // Final iteration without speculative work — nothing to
@@ -1041,6 +1066,7 @@ public class Qwen3ASRModel {
         cache initialCache: [(MLXArray, MLXArray)],
         maxTokens: Int,
         options: Qwen3DecodingOptions,
+        onToken: ((Int32) -> Void)? = nil,
         checkCancellation: () throws -> Void
     ) rethrows -> [Int32] {
         var generatedTokens: [Int32] = []
@@ -1058,6 +1084,7 @@ public class Qwen3ASRModel {
             options: options
         )
         generatedTokens.append(nextToken)
+        if nextToken != Int32(Qwen3ASRTokens.eosTokenId) { onToken?(nextToken) }
 
         for _ in 1..<maxTokens {
             if nextToken == Int32(Qwen3ASRTokens.eosTokenId) { break }
@@ -1077,6 +1104,7 @@ public class Qwen3ASRModel {
                 options: options
             )
             generatedTokens.append(nextToken)
+            if nextToken != Int32(Qwen3ASRTokens.eosTokenId) { onToken?(nextToken) }
         }
         return generatedTokens
     }
