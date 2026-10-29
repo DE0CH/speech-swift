@@ -5,6 +5,16 @@ import MLXNN
 import MLXFast
 import AudioCommon
 
+/// The decoder's keys and values for the prompt before the audio, reused across calls whose prompt up to the audio is
+/// the same (`Qwen3DecodingOptions.promptCache`). Not for concurrent calls.
+public final class Qwen3PromptCache: @unchecked Sendable {
+    var tokens: [Int32] = []
+    var kv: [(MLXArray, MLXArray)]?
+    /// Calls that reused the stored keys and values instead of prefilling the prompt again.
+    public internal(set) var hits = 0
+    public init() {}
+}
+
 /// Optional decoder tunables for `Qwen3ASRModel.transcribe(audio:options:)`.
 ///
 /// Defaults match the historical greedy behaviour of `transcribe(audio:)`
@@ -32,6 +42,11 @@ public struct Qwen3DecodingOptions: Sendable {
 
     /// Called on the decoding thread after each generated token with the transcript so far (prefix included).
     public var onText: (@Sendable (String) -> Void)?
+
+    /// Keys and values of the prompt before the audio (system prompt with `context`, then `<|audio_start|>`), kept
+    /// between calls: when the next call's prompt up to the audio is the same, only the audio onward is prefilled. Pass
+    /// the same instance to consecutive calls; it fills itself on the first.
+    public var promptCache: Qwen3PromptCache?
 
     /// Called once before decoding with the probability the model gives to ending at once (`<|im_end|>` as the first
     /// token after `<asr_text>` and the prefix): with no prefix, how sure it is that the audio holds no speech.
@@ -525,13 +540,26 @@ public class Qwen3ASRModel {
 
         inputEmbeds = concatenated([beforeAudio, audioEmbedsTyped, afterAudio], axis: 1)
 
-        // Initialize KV cache
+        // First pass: the full input embeddings, or only from the audio on when the prompt before it is cached
         var cache: [(MLXArray, MLXArray)]? = nil
-
-        // First pass: process the full input embeddings
         try checkCancellation()
-        let (hiddenStates, newCache) = textDecoder(inputsEmbeds: inputEmbeds, cache: cache)
-        cache = newCache
+        let promptIds = Array(inputIds[0..<audioStartIndex])
+        let hiddenStates: MLXArray
+        if let stored = decodingOptions.promptCache, stored.tokens == promptIds, let kv = stored.kv {
+            stored.hits += 1
+            let rest = inputEmbeds[0..., audioStartIndex..., 0...]
+            let (h, newCache) = textDecoder(inputsEmbeds: rest, cache: kv)
+            hiddenStates = h
+            cache = newCache
+        } else {
+            let (h, newCache) = textDecoder(inputsEmbeds: inputEmbeds, cache: nil)
+            hiddenStates = h
+            cache = newCache
+            if let stored = decodingOptions.promptCache {
+                stored.tokens = promptIds
+                stored.kv = newCache.map { ($0.0[0..., 0..., 0..<audioStartIndex, 0...], $0.1[0..., 0..., 0..<audioStartIndex, 0...]) }
+            }
+        }
 
         // Get logits from the last position using embedding as LM head (tied weights)
         let seqLen = hiddenStates.dim(1)
