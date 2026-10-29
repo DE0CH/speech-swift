@@ -33,6 +33,10 @@ public struct Qwen3DecodingOptions: Sendable {
     /// Called on the decoding thread after each generated token with the transcript so far (prefix included).
     public var onText: (@Sendable (String) -> Void)?
 
+    /// Called once before decoding with the probability the model gives to ending at once (`<|im_end|>` as the first
+    /// token after `<asr_text>` and the prefix): with no prefix, how sure it is that the audio holds no speech.
+    public var onEndProbability: (@Sendable (Float) -> Void)?
+
     /// HuggingFace-style repetition penalty. Divides the logits of tokens
     /// already generated this chunk by this factor before `argMax`.
     /// `1.0` disables; `1.1`–`1.3` is the common tuning range.
@@ -533,6 +537,9 @@ public class Qwen3ASRModel {
         let seqLen = hiddenStates.dim(1)
         let lastHidden = hiddenStates[0..., (seqLen-1)..<seqLen, 0...]
         let logits = textDecoder.embedTokens.asLinear(lastHidden)
+        if let report = decodingOptions.onEndProbability {
+            report(softmax(logits.asType(.float32), axis: -1)[0, 0, T.eosTokenId].item(Float.self))
+        }
 
         // Greedy fast path uses a double-buffered asyncEval decode loop that
         // overlaps the GPU forward pass for token N+1 with the host-side
