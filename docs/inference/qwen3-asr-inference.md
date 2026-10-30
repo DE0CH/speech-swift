@@ -70,6 +70,51 @@ let text = model.transcribe(
 The legacy overload `transcribe(audio:sampleRate:language:maxTokens:context:)`
 remains available and forwards into the new path with default options.
 
+## Blockwise Encoding and Stepwise Runs
+
+The encoder's block attention mask isolates 8 s blocks (800 mel frames, 104
+audio tokens; `Qwen3ASRModel.blockSamples` = 128 000 samples), but the mel
+normalisation (clamp at global max − 8) sees the whole input. With
+`Qwen3DecodingOptions.blockwise = true` the audio is cut into 8 s blocks from
+its start and each block goes through the feature extractor and the encoder on
+its own (later blocks keep their conv chunks padded to 100 frames, as in a joint
+encoding); the encoder outputs are concatenated. A block's encoder output then
+depends only on its own audio. Audio of at most 8 s is encoded exactly as
+without the flag.
+
+`agreementRun(audio:context:maxTokens:)` returns a `Qwen3AgreementRun` for at
+most one block that does the work in bounded, evaluated steps, so a caller can
+interleave other model calls on the same thread between them:
+
+| Steps | Work |
+|---|---|
+| 1 | mel features + conv frontend |
+| 1 per encoder layer | the last one also runs the output projection |
+| 1 per decoder layer | prefill of the whole prompt; the last one also picks the first token |
+| 1 per generated token | greedy, up to `maxTokens` |
+
+`prefillSteps` is the number of steps before the first generated token. The
+finished `text` equals `transcribeThrowing(audio:options:)` with the same
+`context` and `maxTokens` and `blockwise` set.
+
+A finished run of exactly 8 s can stand in for the first block of a longer
+blockwise call through `Qwen3DecodingOptions.firstBlock`: its encoder output
+and its decoder keys and values for the system prompt, `<|audio_start|>` and its
+audio tokens are reused, so only the later blocks are encoded and only the rest
+of the prompt (later audio tokens, `<|audio_end|>` … `<asr_text>`, `prefix`) is
+prefilled. The run is used only when it is finished, came from the same model,
+its audio is the call's first 8 s, its context equals the call's `context` and
+the call's audio is longer than 8 s; otherwise everything is computed. The keys
+and values are reused only when at least 34 rows remain to prefill after the
+first block: shorter prefills run on MLX's vector kernels, which sum in a
+different order than a full prefill, so such calls reuse only the encoder output
+and prefill the whole prompt. `reuses` counts the calls that reused the keys and
+values.
+
+`droppingLastToken(_:)` tokenizes a transcript, drops its last token (and more
+while the rest would end in an incomplete UTF-8 character) and decodes the rest,
+for use as a `prefix` the decoder rewrites the end of.
+
 ## Batched Chunk Decode
 
 `transcribeBatch(audios:sampleRate:language:maxTokens:context:options:)`

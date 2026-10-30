@@ -225,14 +225,8 @@ public class QuantizedTextModel: Module {
             // Autoregressive: single query can attend to all cached positions, no mask needed
             mask = nil
         } else {
-            // Prefill: create causal mask using MLX broadcast operations
-            let cacheLen = cache?.first?.0.dim(2) ?? 0
-            let totalLen = seqLen + cacheLen
-            let rows = (MLXArray(0..<Int32(seqLen)) + Int32(cacheLen)).expandedDimensions(axis: 1)
-            let cols = MLXArray(0..<Int32(totalLen)).expandedDimensions(axis: 0)
-            mask = MLX.where(cols .> rows, MLXArray(Float(-1e9)), MLXArray(Float(0)))
-                .expandedDimensions(axes: [0, 1])
-                .asType(hiddenStates.dtype)
+            // Prefill: causal mask after the cached positions
+            mask = Self.causalMask(seqLen: seqLen, cacheLen: cache?.first?.0.dim(2) ?? 0, dtype: hiddenStates.dtype)
         }
 
         // Apply decoder layers
@@ -248,5 +242,16 @@ public class QuantizedTextModel: Module {
         hiddenStates = norm(hiddenStates)
 
         return (hiddenStates, newCache)
+    }
+
+    /// Prefill mask for `seqLen` new positions after `cacheLen` cached ones: each attends to itself and everything
+    /// before it. Built with MLX broadcast operations: [1, 1, seqLen, cacheLen + seqLen].
+    static func causalMask(seqLen: Int, cacheLen: Int, dtype: DType) -> MLXArray {
+        let totalLen = seqLen + cacheLen
+        let rows = (MLXArray(0..<Int32(seqLen)) + Int32(cacheLen)).expandedDimensions(axis: 1)
+        let cols = MLXArray(0..<Int32(totalLen)).expandedDimensions(axis: 0)
+        return MLX.where(cols .> rows, MLXArray(Float(-1e9)), MLXArray(Float(0)))
+            .expandedDimensions(axes: [0, 1])
+            .asType(dtype)
     }
 }

@@ -360,6 +360,26 @@ public class Qwen3AudioEncoder: Module {
     /// Input: [batch, mel_bins, time]
     /// Output: [time', output_dim] (no batch dim, matching Python)
     public func callAsFunction(_ melFeatures: MLXArray) -> MLXArray {
+        encode(melFeatures, minChunkFrames: 0)
+    }
+
+    /// `callAsFunction` with every conv chunk padded to at least `minChunkFrames` (see `frontend`).
+    func encode(_ melFeatures: MLXArray, minChunkFrames: Int) -> MLXArray {
+        let (frontendOutput, attentionMask) = frontend(melFeatures, minChunkFrames: minChunkFrames)
+        var hiddenStates = frontendOutput
+
+        // Apply transformer layers with attention mask
+        for layer in layers {
+            hiddenStates = layer(hiddenStates, attentionMask: attentionMask)
+        }
+
+        return project(hiddenStates)
+    }
+
+    /// Conv frontend: mel [batch, mel_bins, time] to the transformer input [1, tokens, d_model] and its block attention
+    /// mask. `minChunkFrames` pads every conv chunk to at least that many frames (a short last chunk is padded to the
+    /// full chunk size when it is encoded jointly with full chunks before it); 0 pads to the longest chunk only.
+    func frontend(_ melFeatures: MLXArray, minChunkFrames: Int = 0) -> (hidden: MLXArray, mask: MLXArray) {
         let timeFrames = melFeatures.dim(2)
         let chunkSize = config.nWindow * 2  // 100
 
@@ -377,7 +397,7 @@ public class Qwen3AudioEncoder: Module {
             }
         }
 
-        let maxChunkLen = chunkLengths.max() ?? chunkSize
+        let maxChunkLen = max(chunkLengths.max() ?? chunkSize, minChunkFrames)
 
         // Extract and pad chunks - stack as batch dimension for parallel processing
         var paddedChunks: [MLXArray] = []
@@ -491,13 +511,13 @@ public class Qwen3AudioEncoder: Module {
         // Add batch dimension for transformer: [1, totalTokens, 896]
         hiddenStates = hiddenStates.expandedDimensions(axis: 0)
 
-        // Apply transformer layers with attention mask
-        for layer in layers {
-            hiddenStates = layer(hiddenStates, attentionMask: attentionMask)
-        }
+        return (hiddenStates, attentionMask)
+    }
 
+    /// After the transformer layers: [1, tokens, d_model] to the decoder's audio embeddings [tokens, output_dim].
+    func project(_ transformerOutput: MLXArray) -> MLXArray {
         // Remove batch dimension: [totalTokens, 896]
-        hiddenStates = hiddenStates.squeezed(axis: 0)
+        var hiddenStates = transformerOutput.squeezed(axis: 0)
 
         // Post processing
         hiddenStates = lnPost(hiddenStates)

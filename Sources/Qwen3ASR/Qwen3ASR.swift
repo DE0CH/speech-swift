@@ -48,6 +48,21 @@ public struct Qwen3DecodingOptions: Sendable {
     /// the same instance to consecutive calls; it fills itself on the first.
     public var promptCache: Qwen3PromptCache?
 
+    /// Features and encoder per block of `Qwen3ASRModel.blockSamples` (8 s at 16 kHz, the encoder's attention block):
+    /// the audio is cut into blocks from its start, each goes through the feature extractor on its own audio (so its
+    /// mel normalisation sees only that block) and through the encoder on its own (blocks after the first with their
+    /// conv chunks padded to the full chunk size, as in a joint encoding), and the encoder outputs are concatenated.
+    /// Audio of at most one block is encoded exactly as without it. Needed for `firstBlock`.
+    public var blockwise: Bool = false
+
+    /// A finished `Qwen3AgreementRun` of exactly `Qwen3ASRModel.blockSamples` whose audio is this call's first block
+    /// and whose context equals `context`: its encoder output and its keys and values for the prompt and its audio are
+    /// reused, so only the later blocks are encoded and only the rest of the prompt is prefilled. Ignored (everything
+    /// computed) unless `blockwise` is set, the run is finished and from this model, its audio and context match and
+    /// this call's audio is longer than one block. The keys and values are reused only when enough of the prompt is
+    /// left to prefill after the first block (`Qwen3ASRModel.minReusedPrefillRows`); otherwise the whole prompt is.
+    public var firstBlock: Qwen3AgreementRun?
+
     /// Called once before decoding with the probability the model gives to ending at once (`<|im_end|>` as the first
     /// token after `<asr_text>` and the prefix): with no prefix, how sure it is that the audio holds no speech.
     public var onEndProbability: (@Sendable (Float) -> Void)?
@@ -159,7 +174,7 @@ public class Qwen3ASRModel {
     public var textDecoder: QuantizedTextModel?
 
     /// Tokenizer for decoding output tokens
-    private var tokenizer: Qwen3Tokenizer?
+    var tokenizer: Qwen3Tokenizer?
 
     /// Text decoder config
     public let textConfig: TextDecoderConfig
@@ -355,10 +370,21 @@ public class Qwen3ASRModel {
             : 0.0
         let effective = options.adaptedFor(audioDurationSeconds: durationSeconds)
 
-        let melFeatures = featureExtractor.process(audio, sampleRate: sampleRate)
-        try checkCancellation()
-        let batchedFeatures = melFeatures.expandedDimensions(axis: 0)
-        var audioEmbeds = audioEncoder(batchedFeatures)
+        var audioEmbeds: MLXArray
+        var firstBlock: Qwen3AgreementRun? = nil
+        if options.blockwise {
+            let rate = featureExtractor.sampleRate
+            let samples = sampleRate == rate ? audio : AudioFileLoader.resample(audio, from: sampleRate, to: rate)
+            if let run = options.firstBlock, run.canStandIn(forFirstBlockOf: samples, context: options.context, model: self) {
+                firstBlock = run
+            }
+            audioEmbeds = try blockwiseEmbeddings(samples, firstBlock: firstBlock, checkCancellation: checkCancellation)
+        } else {
+            let melFeatures = featureExtractor.process(audio, sampleRate: sampleRate)
+            try checkCancellation()
+            let batchedFeatures = melFeatures.expandedDimensions(axis: 0)
+            audioEmbeds = audioEncoder(batchedFeatures)
+        }
         audioEmbeds = audioEmbeds.expandedDimensions(axis: 0)
         guard let textDecoder = textDecoder else {
             let shape = audioEmbeds.shape
@@ -371,8 +397,42 @@ public class Qwen3ASRModel {
             maxTokens: effective.maxTokens,
             context: effective.context,
             decodingOptions: effective,
+            firstBlock: firstBlock,
             checkCancellation: checkCancellation
         )
+    }
+
+    /// Encoder output [tokens, output_dim] of 16 kHz `audio` cut into blocks of `blockSamples` from its start (see
+    /// `Qwen3DecodingOptions.blockwise`). `firstBlock`'s encoder output stands for the first block when given.
+    func blockwiseEmbeddings(
+        _ audio: [Float],
+        firstBlock: Qwen3AgreementRun?,
+        checkCancellation: () throws -> Void
+    ) rethrows -> MLXArray {
+        let rate = featureExtractor.sampleRate
+        let chunkFrames = audioEncoder.config.nWindow * 2
+        var blocks: [MLXArray] = []
+        var start = 0
+        if let first = firstBlock?.encoderOutput {
+            blocks.append(first)
+            start = Self.blockSamples
+        }
+        while start < audio.count {
+            let end = min(start + Self.blockSamples, audio.count)
+            // A tail shorter than one hop has no mel frame of its own (as at the end of one joint spectrogram).
+            if start == 0 || end - start >= featureExtractor.hopLength {
+                try checkCancellation()
+                let mel = featureExtractor.process(Array(audio[start..<end]), sampleRate: rate)
+                try checkCancellation()
+                blocks.append(audioEncoder.encode(
+                    mel.expandedDimensions(axis: 0), minChunkFrames: start == 0 ? 0 : chunkFrames))
+            }
+            start = end
+        }
+        guard !blocks.isEmpty else {
+            return audioEncoder(featureExtractor.process(audio, sampleRate: rate).expandedDimensions(axis: 0))
+        }
+        return blocks.count == 1 ? blocks[0] : concatenated(blocks, axis: 0)
     }
 
     /// Transcribe audio to text
@@ -463,6 +523,7 @@ public class Qwen3ASRModel {
         maxTokens: Int,
         context: String? = nil,
         decodingOptions: Qwen3DecodingOptions = Qwen3DecodingOptions(),
+        firstBlock: Qwen3AgreementRun? = nil,
         checkCancellation: () throws -> Void
     ) rethrows -> String {
         defer {
@@ -475,7 +536,7 @@ public class Qwen3ASRModel {
         return try generateTextImpl(
             audioEmbeds: audioEmbeds, textDecoder: textDecoder,
             language: language, maxTokens: maxTokens, context: context,
-            decodingOptions: decodingOptions, checkCancellation: checkCancellation)
+            decodingOptions: decodingOptions, firstBlock: firstBlock, checkCancellation: checkCancellation)
     }
 
     private func generateTextImpl(
@@ -485,6 +546,7 @@ public class Qwen3ASRModel {
         maxTokens: Int,
         context: String?,
         decodingOptions: Qwen3DecodingOptions,
+        firstBlock: Qwen3AgreementRun?,
         checkCancellation: () throws -> Void
     ) rethrows -> String {
         let T = Qwen3ASRTokens.self
@@ -540,12 +602,21 @@ public class Qwen3ASRModel {
 
         inputEmbeds = concatenated([beforeAudio, audioEmbedsTyped, afterAudio], axis: 1)
 
-        // First pass: the full input embeddings, or only from the audio on when the prompt before it is cached
+        // First pass: the full input embeddings, or only from the audio on when the prompt before it is cached, or only
+        // after the first block's audio when `firstBlock` holds the keys and values up to there
         var cache: [(MLXArray, MLXArray)]? = nil
         try checkCancellation()
         let promptIds = Array(inputIds[0..<audioStartIndex])
         let hiddenStates: MLXArray
-        if let stored = decodingOptions.promptCache, stored.tokens == promptIds, let kv = stored.kv {
+        if let base = firstBlock, let kv = base.promptKV, base.promptIds == promptIds,
+           base.audioTokens <= numAudioTokens,
+           inputEmbeds.dim(1) - (audioStartIndex + base.audioTokens) >= Self.minReusedPrefillRows {
+            base.countReuse()
+            let rest = inputEmbeds[0..., (audioStartIndex + base.audioTokens)..., 0...]
+            let (h, newCache) = textDecoder(inputsEmbeds: rest, cache: kv)
+            hiddenStates = h
+            cache = newCache
+        } else if let stored = decodingOptions.promptCache, stored.tokens == promptIds, let kv = stored.kv {
             stored.hits += 1
             let rest = inputEmbeds[0..., audioStartIndex..., 0...]
             let (h, newCache) = textDecoder(inputsEmbeds: rest, cache: kv)
