@@ -116,6 +116,12 @@ public class Qwen3Tokenizer {
     /// Collects all bytes before converting to UTF-8, so multi-byte characters
     /// split across BPE tokens (e.g. CJK) decode correctly.
     public func decode(tokens: [Int]) -> String {
+        decode(tokens: tokens, trimming: true)
+    }
+
+    /// Decode token IDs to text; with `trimming` false the spaces at either end are kept (a continuation of other
+    /// text whose first token starts a new word begins with its space).
+    public func decode(tokens: [Int], trimming: Bool) -> String {
         var buffer: [UInt8] = []
 
         for tokenId in tokens {
@@ -145,7 +151,7 @@ public class Qwen3Tokenizer {
 
         let text = String(bytes: buffer, encoding: .utf8)
             ?? String(decoding: buffer, as: UTF8.self)
-        return text.trimmingCharacters(in: .whitespaces)
+        return trimming ? text.trimmingCharacters(in: .whitespaces) : text
     }
 
     /// Byte-to-unicode mapping table (GPT-2 style)

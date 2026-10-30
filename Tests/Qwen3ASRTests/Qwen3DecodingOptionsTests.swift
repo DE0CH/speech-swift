@@ -233,6 +233,16 @@ final class Qwen3DecodingOptionsTests: XCTestCase {
         XCTAssertGreaterThan(peakHits, trials / 2,
             "peaky distribution + low temperature should still pick the peak > 50% of trials")
     }
+
+    // MARK: - Text of a call
+
+    func testWithoutSplitCharacterDropsOnlyTrailingReplacementCharacters() {
+        XCTAssertEqual(Qwen3ASRModel.withoutSplitCharacter("我而家send俾\u{FFFD}"), "我而家send俾")
+        XCTAssertEqual(Qwen3ASRModel.withoutSplitCharacter("好\u{FFFD}\u{FFFD}"), "好")
+        XCTAssertEqual(Qwen3ASRModel.withoutSplitCharacter("a\u{FFFD}b"), "a\u{FFFD}b")
+        XCTAssertEqual(Qwen3ASRModel.withoutSplitCharacter("\u{FFFD}"), "")
+        XCTAssertEqual(Qwen3ASRModel.withoutSplitCharacter("hello"), "hello")
+    }
 }
 
 // MARK: - E2E wiring (requires 0.6B Qwen3-ASR download + MLX)

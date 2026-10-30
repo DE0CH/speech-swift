@@ -176,13 +176,13 @@ public final class Qwen3AgreementRun: @unchecked Sendable {
         }
     }
 
-    /// The transcript as `transcribe` writes it (no `<|im_end|>`, nothing up to `<asr_text>`, trimmed), then the
-    /// decoding arrays are dropped; the encoder output and `promptKV` stay.
+    /// The transcript as `transcribe` writes it (no `<|im_end|>`, nothing up to `<asr_text>`, no incomplete character at
+    /// the end, trimmed), then the decoding arrays are dropped; the encoder output and `promptKV` stay.
     private func finish(tokenizer: Qwen3Tokenizer) {
         let eos = Int32(Qwen3ASRTokens.eosTokenId)
         var raw = tokenizer.decode(tokens: tokens.filter { $0 != eos }.map { Int($0) })
         if let range = raw.range(of: "<asr_text>") { raw = String(raw[range.upperBound...]) }
-        text = raw.trimmingCharacters(in: .whitespaces)
+        text = Qwen3ASRModel.withoutSplitCharacter(raw).trimmingCharacters(in: .whitespaces)
         finished = true
         cache = []
         lastToken = nil
@@ -224,6 +224,14 @@ extension Qwen3ASRModel {
     /// A transcription of `audio` (16 kHz, at most `blockSamples`) done in bounded steps; see `Qwen3AgreementRun`.
     public func agreementRun(audio: [Float], context: String, maxTokens: Int) -> Qwen3AgreementRun {
         Qwen3AgreementRun(model: self, audio: audio, context: context, maxTokens: maxTokens)
+    }
+
+    /// `text` without the U+FFFD that a character cut between two byte tokens decodes to at its end (the text so far
+    /// while the model is mid-character, or one stopped at `maxTokens` there).
+    static func withoutSplitCharacter(_ text: String) -> String {
+        var scalars = text.unicodeScalars
+        while scalars.last == "\u{FFFD}" { scalars.removeLast() }
+        return String(scalars)
     }
 
     /// `text` without its last token (tokenized as the decoder would write it), and without further tokens while the

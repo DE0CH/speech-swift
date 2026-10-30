@@ -5,7 +5,8 @@ import Foundation
 
 /// `Qwen3AgreementRun` (a transcription in bounded steps) writes the same text as one `transcribeThrowing` call with
 /// `blockwise`; `Qwen3DecodingOptions.firstBlock` reuse writes the same text as computing every block; and
-/// `droppingLastToken` drops whole tokens and whole characters.
+/// `droppingLastToken` drops whole tokens and whole characters; a call continuing from a prefix keeps the space its
+/// first generated word starts with.
 final class E2EQwen3AgreementRunTests: XCTestCase {
 
     static let modelId = "aufklarer/Qwen3-ASR-0.6B-MLX-4bit"
@@ -143,6 +144,29 @@ final class E2EQwen3AgreementRunTests: XCTestCase {
             XCTAssertTrue(text.hasPrefix(dropped), dropped)
             XCTAssertLessThan(dropped.count, text.count)
             XCTAssertFalse(dropped.unicodeScalars.contains("\u{FFFD}"), dropped)
+        }
+    }
+
+    func testPrefixKeepsTheSpaceBeforeTheNextWord() async throws {
+        let model = try await loadModel()
+        let audio = Array(try loadAudio().prefix(Qwen3ASRModel.blockSamples))
+        var plain = Qwen3DecodingOptions()
+        plain.context = Self.context
+        let full = try model.transcribeThrowing(audio: audio, sampleRate: 16000, options: plain)
+        let words = full.split(separator: " ")
+        try XCTSkipIf(words.count < 3, "too few words in \(full)")
+        // Two whole words: the model goes on with the third, a token that starts with a space.
+        let prefix = words.prefix(2).joined(separator: " ")
+        final class Partials: @unchecked Sendable { var texts: [String] = [] }
+        let partials = Partials()
+        var options = plain
+        options.prefix = prefix
+        options.onText = { partials.texts.append($0) }
+        let text = try model.transcribeThrowing(audio: audio, sampleRate: 16000, options: options)
+        XCTAssertTrue(text.hasPrefix(prefix + " "), text)
+        for partial in partials.texts {
+            XCTAssertTrue(partial.hasPrefix(prefix), partial)
+            XCTAssertNotEqual(partial.unicodeScalars.last, "\u{FFFD}", partial)
         }
     }
 }

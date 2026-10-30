@@ -37,10 +37,11 @@ public struct Qwen3DecodingOptions: Sendable {
 
     /// Transcript text the decoder continues from: placed after `<asr_text>` as if the model had already written it, so
     /// only what follows is generated (streaming: the previous pass's text minus its last few tokens). The result
-    /// includes it.
+    /// includes it verbatim, followed by the generated text with the space it starts with, if any (a new word).
     public var prefix: String?
 
-    /// Called on the decoding thread after each generated token with the transcript so far (prefix included).
+    /// Called on the decoding thread after each generated token with the transcript so far (prefix included; a
+    /// character not yet complete at the end is left out until it is).
     public var onText: (@Sendable (String) -> Void)?
 
     /// Keys and values of the prompt before the audio (system prompt with `context`, then `<|audio_start|>`), kept
@@ -649,13 +650,17 @@ public class Qwen3ASRModel {
         // the full logits tensor to CPU for repetition / n-gram / temperature
         // manipulation, which would defeat the overlap.
         // The text so far: the prefix, then the generated tokens without a "language XX<asr_text>" lead or the EOS.
+        // After a prefix the generated text keeps the space it starts with (a new word after the prefix's last one).
         let tokenizer = self.tokenizer
         func text(_ tokens: [Int32]) -> String {
             guard let tokenizer else { return "" }
             let eos = Int32(T.eosTokenId)
-            var raw = tokenizer.decode(tokens: tokens.filter { $0 != eos }.map { Int($0) })
+            var raw = tokenizer.decode(tokens: tokens.filter { $0 != eos }.map { Int($0) }, trimming: prefix.isEmpty)
             if let range = raw.range(of: "<asr_text>") { raw = String(raw[range.upperBound...]) }
-            return prefix.isEmpty ? raw.trimmingCharacters(in: .whitespaces) : prefix + raw
+            raw = Self.withoutSplitCharacter(raw)
+            guard !prefix.isEmpty else { return raw.trimmingCharacters(in: .whitespaces) }
+            while let last = raw.last, last.isWhitespace { raw.removeLast() }
+            return prefix + raw
         }
         var sofar: [Int32] = []
         let onToken: ((Int32) -> Void)? = decodingOptions.onText.map { onText in

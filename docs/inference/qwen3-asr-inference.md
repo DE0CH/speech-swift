@@ -113,7 +113,12 @@ values.
 
 `droppingLastToken(_:)` tokenizes a transcript, drops its last token (and more
 while the rest would end in an incomplete UTF-8 character) and decodes the rest,
-for use as a `prefix` the decoder rewrites the end of.
+for use as a `prefix` the decoder rewrites the end of. A call with a `prefix`
+returns the prefix verbatim followed by the generated text, keeping the space
+the generated text starts with (`"hello"` continued with `Ġworld` gives
+`"hello world"`). The text passed to `onText` after each token, and a final text
+stopped at `maxTokens`, leaves out a character whose bytes are not all generated
+yet (no trailing U+FFFD).
 
 ## Batched Chunk Decode
 
