@@ -215,10 +215,10 @@ extension Qwen3ASRModel {
     /// attends to another.
     public static let blockSamples = 128_000
 
-    /// Fewest rows left to prefill after a reused first block for its decoder keys and values to be reused. Below
-    /// this MLX switches to its vector kernels (`sdpa_vector` at 8 or fewer queries, `qmv`/`qmv_mma` below the qmv
-    /// batch limit of at most 33), which sum in a different order than a full prefill, so the text could differ.
-    /// Shorter calls still reuse the encoder output and prefill the whole prompt.
+    /// Fewest rows left to prefill after reused decoder keys and values (a first block's, or the prompt cache's) for
+    /// them to be reused. Below this MLX switches to its vector kernels (`sdpa_vector` at 8 or fewer queries,
+    /// `qmv`/`qmv_mma` below the qmv batch limit of at most 33), which sum in a different order than a full prefill,
+    /// so the text could differ. Shorter calls prefill the whole prompt (a first block's encoder output is still reused).
     static let minReusedPrefillRows = 34
 
     /// A transcription of `audio` (16 kHz, at most `blockSamples`) done in bounded steps; see `Qwen3AgreementRun`.

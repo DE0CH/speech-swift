@@ -44,7 +44,8 @@ public struct Qwen3DecodingOptions: Sendable {
     public var onText: (@Sendable (String) -> Void)?
 
     /// Keys and values of the prompt before the audio (system prompt with `context`, then `<|audio_start|>`), kept
-    /// between calls: when the next call's prompt up to the audio is the same, only the audio onward is prefilled. Pass
+    /// between calls: when the next call's prompt up to the audio is the same, only the audio onward is prefilled (when at
+    /// least `Qwen3ASRModel.minReusedPrefillRows` rows are left to prefill; otherwise the whole prompt is). Pass
     /// the same instance to consecutive calls; it fills itself on the first.
     public var promptCache: Qwen3PromptCache?
 
@@ -616,7 +617,8 @@ public class Qwen3ASRModel {
             let (h, newCache) = textDecoder(inputsEmbeds: rest, cache: kv)
             hiddenStates = h
             cache = newCache
-        } else if let stored = decodingOptions.promptCache, stored.tokens == promptIds, let kv = stored.kv {
+        } else if let stored = decodingOptions.promptCache, stored.tokens == promptIds, let kv = stored.kv,
+                  inputEmbeds.dim(1) - audioStartIndex >= Self.minReusedPrefillRows {
             stored.hits += 1
             let rest = inputEmbeds[0..., audioStartIndex..., 0...]
             let (h, newCache) = textDecoder(inputsEmbeds: rest, cache: kv)
